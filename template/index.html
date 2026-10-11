@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <title>Omakase demo</title>
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <!-- The film plan: the camera's shots in film time. Written by src/project.mjs. -->
+    <script src="film.js"></script>
+    <style>
+      @font-face {
+        font-family: "Plex Serif";
+        src: url("assets/IBMPlexSerif-Regular.ttf") format("truetype");
+      }
+      body {
+        margin: 0;
+        background: #07171d;
+      }
+      #root {
+        position: relative;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #07171d;
+      }
+      #ground {
+        position: absolute;
+        inset: 0;
+        background: #07171d;
+      }
+      #logo {
+        position: absolute;
+        inset: 0;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 44px;
+      }
+      #logo-mark {
+        display: block;
+        width: 240px;
+        height: 240px;
+      }
+      #logo-word {
+        display: block;
+        width: 600px;
+        text-align: center;
+        font-family: "Plex Serif", Georgia, serif;
+        font-size: 76px;
+        line-height: 1.1;
+        letter-spacing: 0.04em;
+        color: #cde1e4;
+      }
+      /* #app carries the seam, #camera carries the shots. The videos are the
+         timed clips, so neither wrapper may be timed. */
+      #app,
+      #camera {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+      }
+      .take {
+        position: absolute;
+        left: 0;
+        top: 0;
+        width: 1920px;
+        height: 1080px;
+        object-fit: cover;
+      }
+      #curtain {
+        position: absolute;
+        inset: 0;
+        background: #02090d;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="__DURATION__">
+      <div id="ground"></div>
+      <div id="app">
+        <div id="camera">
+          __VIDEOS__
+        </div>
+      </div>
+      <section id="logo" class="clip" data-start="0" data-duration="__LOGO__" data-track-index="1">
+        <img id="logo-mark" src="assets/icon.png" alt="" />
+        <div id="logo-word">omakase</div>
+      </section>
+      <div id="curtain"></div>
+      __AUDIO__
+    </div>
+    <script>
+      const W = 1920;
+      const H = 1080;
+      const film = window.__film;
+      const CUT = film.logo;
+      const tl = gsap.timeline({ paused: true });
+
+      // --- Logo, in silence. One seam: a push through the mark into the app.
+      tl.fromTo("#logo-mark", { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.25);
+      tl.fromTo("#logo-word", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.43);
+      tl.fromTo("#logo", { scale: 1 }, { scale: 1.32, duration: 0.42, ease: "power4.in" }, CUT - 0.42);
+      tl.fromTo("#logo", { opacity: 1 }, { opacity: 0, duration: 0.2, ease: "power1.in" }, CUT - 0.2);
+      tl.fromTo("#app", { scale: 0.9, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.6, ease: "power4.out" }, CUT);
+
+      // --- Camera. The shots arrive planned; this only plays them.
+      const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
+      // Centre the point (x, y), given as fractions of the window, at this
+      // zoom, without ever showing past the edge of the footage.
+      const pose = ({ x, y, zoom }) => ({ scale: zoom, x: clamp(W / 2 - x * W * zoom, W - W * zoom, 0), y: clamp(H / 2 - y * H * zoom, H - H * zoom, 0) });
+      let from = pose({ x: 0.5, y: 0.5, zoom: 1 });
+      gsap.set("#camera", { transformOrigin: "0 0", ...from });
+      for (const shot of film.shots) {
+        // Shots never overlap, so each starts from the pose the last one reached.
+        const to = pose(shot.frame);
+        tl.fromTo("#camera", { ...from }, { ...to, duration: shot.duration, ease: shot.ease, immediateRender: false }, shot.t);
+        from = to;
+      }
+
+      // --- End clean.
+      tl.fromTo("#curtain", { opacity: 0 }, { opacity: 1, duration: 0.7, ease: "power2.in" }, film.duration - 0.7);
+      window.__timelines["main"] = tl;
+    </script>
+  </body>
+</html>

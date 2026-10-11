@@ -1,0 +1,9 @@
+{
+  "name": "omakase-demo-factory",
+  "private": true,
+  "type": "module",
+  "description": "Screenplay in, demo video out: records the real Omakase app and cuts it with HyperFrames.",
+  "bin": { "demo": "bin/demo.mjs" },
+  "scripts": { "demo": "node bin/demo.mjs" },
+  "dependencies": { "yaml": "^2.5.0" }
+}

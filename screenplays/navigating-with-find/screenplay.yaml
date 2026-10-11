@@ -1,0 +1,49 @@
+# Drafted from narration.md. Edit the narration and draft again; delete this line to edit by hand.
+# Source: screenplays/navigating-with-find/narration.md
+title: Navigating with find
+vault: demo-notes
+music: demo-notes/backing-tracks/Mozart-The Marriage of Figaro.wav
+
+setup:
+  - keystroke-hud: on
+  # The vault shows through find, not through a file list.
+  - sidebar: closed
+  # Let the startup notice and the key card fade before the camera rolls.
+  - pause: 4s
+
+scenes:
+  - name: hello
+    steps:
+      - pause: 1s
+      - type: |
+          ## Hi
+          ### Welcome to omakase
+          This is notes.
+
+          Let me show you how to navigate with find
+        wpm: 84
+      - pause: 1.1s
+
+  - name: across-the-vault
+    steps:
+      - find: tiramisu
+        down: 1
+        lands: tiramisu
+      - pause: 1.3s
+      - find: rule of 72
+        lands: high-performers-how-great-stocks-compound
+      - pause: 1.3s
+
+  - name: inside-the-note
+    steps:
+      - find: moat
+        in: note
+        down: 3
+        lands: high-performers-how-great-stocks-compound
+      - pause: 1.3s
+
+  - name: fin
+    steps:
+      - find: demo end
+        lands: demo-end
+      - pause: 2.5s
