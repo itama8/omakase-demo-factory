@@ -17,8 +17,9 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const omakaseRoot = process.env.OMAKASE_ROOT ?? (existsSync("scripts/app-session.mjs") ? process.cwd() : path.resolve(root, "../omakase-v2"));
 const usage = `Usage: node bin/demo.mjs <command> [screenplay]
 
-  draft              list the narration notes found in your Omakase vault
+  draft              list every narration and whether its screenplay is new, changed, or current
   draft <note>       turn a narration into a screenplay that passes the check   -> screenplays/<name>/
+  draft --all        draft every narration that is new or changed
   actions            list what a screenplay can ask the app to do
   check [name...]    perform at full speed with no recording; fails if the app has drifted
   rehearse <name>    perform at demo pace with no recording; saves a screenshot per jump
@@ -31,7 +32,8 @@ const usage = `Usage: node bin/demo.mjs <command> [screenplay]
 
 const [command, ...rest] = process.argv.slice(2);
 const force = rest.includes("--force");
-const names = rest.filter((arg) => arg !== "--force");
+const all = rest.includes("--all");
+const names = rest.filter((arg) => arg !== "--force" && arg !== "--all");
 const out = (name) => path.join(root, "out", name);
 const load = (name) => loadScreenplay(path.join(root, "screenplays", name, "screenplay.yaml"), { actions, app, omakaseRoot });
 const hyperframes = (name, ...args) => {
@@ -65,22 +67,33 @@ function render(name) {
 
 const commands = {
   async draft() {
-    if (!names.length) {
-      const notes = await findNarrations();
-      if (!notes.length) console.log('No narration notes found. A narration is a note whose first line is "# Screenplay: <title>".');
-      for (const note of notes) console.log(`${note.name.padEnd(28)} ${note.file}`);
+    const draftOne = async (narration) => {
+      const { file, unsupported, orphans } = await draft({
+        narration, root, omakaseRoot, actions, app, force,
+        validate: (path) => loadScreenplay(path, { actions, app, omakaseRoot }),
+        perform: (name) => perform(name, { record: false, pace: 0, scale: 1 })
+      });
+      console.log(`${narration.name}: drafted and checked -> ${file}`);
+      if (unsupported.length) console.log(`\nNot in the screenplay, because no action can do it yet:\n${unsupported.map((line) => `  - ${line}`).join("\n")}`);
+      if (orphans.length) console.log(`\nedit.yaml names spans this screenplay no longer has. Fix them before cutting:\n${orphans.map((id) => `  - ${id}`).join("\n")}`);
+      console.log(`\nNext: node bin/demo.mjs make ${narration.name}`);
+    };
+    if (names.length) return draftOne(await resolveNarration(names.join(" "), root));
+    const notes = await findNarrations(root);
+    if (!all) {
+      if (!notes.length) console.log('No narrations found. Put a Markdown file under screenplays/, or start a vault note with "# Screenplay: <title>".');
+      for (const note of notes) console.log(`${note.state.padEnd(13)} ${note.name.padEnd(28)} ${path.relative(root, note.file).startsWith("..") ? note.file : path.relative(root, note.file)}`);
       return;
     }
-    const narration = await resolveNarration(names.join(" "));
-    const { file, unsupported, orphans } = await draft({
-      narration, root, omakaseRoot, actions, app, force,
-      validate: (path) => loadScreenplay(path, { actions, app, omakaseRoot }),
-      perform: (name) => perform(name, { record: false, pace: 0, scale: 1 })
-    });
-    console.log(`${narration.name}: drafted and checked -> ${file}`);
-    if (unsupported.length) console.log(`\nNot in the screenplay, because no action can do it yet:\n${unsupported.map((line) => `  - ${line}`).join("\n")}`);
-    if (orphans.length) console.log(`\nedit.yaml names spans this screenplay no longer has. Fix them before cutting:\n${orphans.map((id) => `  - ${id}`).join("\n")}`);
-    console.log(`\nNext: node bin/demo.mjs make ${narration.name}`);
+    const due = notes.filter((note) => note.state === "new" || note.state === "changed");
+    if (!due.length) console.log("Every narration's screenplay is current.");
+    // One failed draft must not stop the others.
+    let failed = 0;
+    for (const note of due) {
+      try { await draftOne(note); } catch (error) { failed++; console.error(`${note.name}: ${error.message}`); }
+      console.log();
+    }
+    if (failed) throw new Error(`${failed} of ${due.length} drafts failed`);
   },
   actions() {
     for (const [name, action] of Object.entries(actions)) {
@@ -94,7 +107,7 @@ const commands = {
     console.log("custom\n  The escape hatch: \"custom: file.mjs#name\" calls an exported function(stage, step) from a file beside the screenplay.");
   },
   async check() {
-    const all = names.length ? names : (await readdir(path.join(root, "screenplays"), { withFileTypes: true })).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort();
+    const all = names.length ? names : (await readdir(path.join(root, "screenplays"), { withFileTypes: true })).filter((entry) => entry.isDirectory() && existsSync(path.join(root, "screenplays", entry.name, "screenplay.yaml"))).map((entry) => entry.name).sort();
     for (const name of all) {
       // Scale 1 fits the check runner's 1280x1024 display.
       const { take, took } = await perform(name, { record: false, pace: 0, scale: 1 });

@@ -4,7 +4,7 @@ Read `README.md` first: it is the manual for screenplays, edits, and the pipelin
 
 When working on a demo with the user:
 
-- The user writes narration in plain English; `node bin/demo.mjs draft <note>` converts it. When a demo has a `narration.md`, change the narration and draft again instead of editing the drafted YAML.
+- The user writes narration in plain English, in Markdown files with any name under `screenplays/` or in their vault. `node bin/demo.mjs draft` lists them and `draft <note>` converts one. When a screenplay starts with "# Drafted from", change its narration and draft again instead of editing the YAML. Never rename, move, or copy a narration.
 - Write the screenplay in `screenplays/<name>/screenplay.yaml` from the actions `node bin/demo.mjs actions` lists. Do not invent an action; add it to `actions/omakase.mjs` or use `custom`.
 - Prove it with `node bin/demo.mjs check <name>` before recording. A screenplay that needs a pause to pass is wrong: fix the action's wait.
 - Change pacing, cuts, and framing in `edit.yaml`, anchored to spans. Re-record only when the performance itself changes.

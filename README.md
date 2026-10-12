@@ -16,11 +16,9 @@ The app comes from `../omakase-v2` (override with `OMAKASE_ROOT`) and must alrea
 
 ## Starting from narration
 
-Write the demo in plain English, in Omakase or any Markdown file. The first line marks it as a narration:
+Write the demo in plain English, in a Markdown file with any name you like.
 
 ```md
-# Screenplay: Navigating with find
-
 Cut to a blank note. Music starts, Mozart's Marriage of Figaro.
 
 Type, camera on the caret: ...
@@ -28,14 +26,23 @@ Type, camera on the caret: ...
 Search the whole vault for tiramisu. Arrow down once through the matches and jump into the recipe.
 ```
 
+Narrations are picked up from two places:
+
+- **Anywhere under `screenplays/`.** Every Markdown file there is a narration. A loose file such as `screenplays/quick tiramisu lookup.md` becomes the demo `quick-tiramisu-lookup`. A file inside a folder, such as `screenplays/moats/first idea.md`, belongs to the demo `moats`. Keep one narration per demo folder.
+- **Your Omakase vault**, for notes whose first line is `# Screenplay: <title>`. The title names the demo.
+
+A first line of `# Screenplay: <title>` is optional under `screenplays/`; when present, it titles the demo and names a loose file's demo.
+
 ```bash
-node bin/demo.mjs draft                          # narration notes found in your vault
-node bin/demo.mjs draft "Navigating with find"   # by title, by name, or by file path
+node bin/demo.mjs draft                    # every narration: new, changed, current, or hand-written
+node bin/demo.mjs draft --all              # draft the new and changed ones
+node bin/demo.mjs draft "first idea"       # one, by demo name, title, file name, or path
 ```
 
 `draft` hands the narration to Claude with the action vocabulary and the demo vault's notes, and writes `screenplays/<name>/screenplay.yaml`. It then validates the draft and performs it at full speed, and sends any failure back for a repair, up to three attempts. A draft it keeps is one that already works in the app.
 
 - It needs the `claude` command (Claude Code) on the PATH. The narration and the demo vault's note names and headings are sent to Claude; your own vault is only read to find narrations.
+- The narration stays where you put it and is never copied or renamed. The screenplay's second line records its path and a digest of its text, which is how `draft` knows a narration has changed. Renaming or moving a narration is fine; the next draft records the new path.
 - Anything the narration asks for that no action can do is listed after the draft and left out, not improvised.
 - The narration is the source. To change the demo, change the narration and draft again: unchanged parts keep their scene names, so edits keep pointing at them. If `edit.yaml` names a span the new draft no longer has, `draft` says so.
 - A screenplay written by hand is not overwritten without `--force`. Delete the first comment line of a drafted screenplay to take it over by hand.
@@ -43,7 +50,7 @@ node bin/demo.mjs draft "Navigating with find"   # by title, by name, or by file
 
 ## Writing a screenplay
 
-A demo is a folder in `screenplays/` with a `screenplay.yaml`, an optional `edit.yaml`, and `narration.md` when it was drafted. You can also write the YAML directly.
+A demo is a folder in `screenplays/` with a `screenplay.yaml`, an optional `edit.yaml`, and usually the narration it was drafted from. You can also write the YAML directly.
 
 ```yaml
 title: Navigating with find

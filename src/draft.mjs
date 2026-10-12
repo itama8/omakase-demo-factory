@@ -1,11 +1,13 @@
 // Draft a screenplay from plain-English narration.
 //
-// The narration is a note: in the Omakase vault, or any Markdown file. Its
-// first line is "# Screenplay: <title>". Claude reads it beside the action
-// vocabulary and the demo vault's contents, and writes screenplay.yaml. The
+// A narration is a Markdown file with any name: every one under
+// screenplays/, and any note in the Omakase vault whose first line is
+// "# Screenplay: <title>". Claude reads it beside the action vocabulary and
+// the demo vault's contents, and writes screenplay.yaml. The
 // draft is then validated, and performed at full speed, and any failure goes
 // back for a repair. So a draft that is kept is one that already works.
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
@@ -14,10 +16,12 @@ import { editSpans } from "./edit.mjs";
 
 const MARK = /^#\s*Screenplay:\s*(.+?)\s*$/i;
 /** The first line of a drafted screenplay. Remove it to take the file over by hand. */
-export const DRAFTED = "# Drafted from narration.md. Edit the narration and draft again; delete this line to edit by hand.";
+export const DRAFTED = "# Drafted from a narration. Edit the narration and draft again; delete this line to edit by hand.";
+const isDrafted = (text) => text.startsWith("# Drafted from ");
 
 const slug = (title) => title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
 const titleOf = (text) => text.split("\n").find((line) => line.trim())?.match(MARK)?.[1] ?? null;
+const digest = (text) => createHash("sha256").update(text).digest("hex").slice(0, 12);
 
 async function markdownUnder(dir, skip = (name) => name.startsWith(".") || name === "node_modules") {
   const found = [];
@@ -30,36 +34,58 @@ async function markdownUnder(dir, skip = (name) => name.startsWith(".") || name 
   return found;
 }
 
-/** Where narration notes are looked for: OMAKASE_NOTES, or the profiles Omakase uses on this machine. */
+/** Where vault narrations are looked for: OMAKASE_NOTES, or the profiles Omakase uses on this machine. */
 export function vaults() {
   if (process.env.OMAKASE_NOTES) return process.env.OMAKASE_NOTES.split(":");
   return [".config/Electron/vault", ".config/omakase/vault"].map((dir) => path.join(os.homedir(), dir)).filter((dir) => existsSync(dir));
 }
 
-/** Every narration note in the vaults, as { title, name, file }. */
-export async function findNarrations() {
+// A narration and the demo it belongs to. `state` says whether its
+// screenplay is missing, older than the narration, or current.
+async function describe(file, root, name) {
+  const text = await readFile(file, "utf8");
+  const title = titleOf(text) ?? path.basename(file, ".md");
+  const demo = name ?? slug(title);
+  const screenplay = await readFile(path.join(root, "screenplays", demo, "screenplay.yaml"), "utf8").catch(() => null);
+  const state = screenplay === null ? "new" : !isDrafted(screenplay) ? "hand-written" : screenplay.includes(`sha256:${digest(text)}`) ? "current" : "changed";
+  return { title, name: demo, file, state };
+}
+
+/**
+ * Every narration, as { title, name, file, state }.
+ *
+ * Under screenplays/ any Markdown file counts, whatever it is called. A file
+ * inside a demo's folder belongs to that demo; a loose file names its demo by
+ * its "# Screenplay:" title, or by its own file name. In the vault only notes
+ * that start with "# Screenplay: <title>" count.
+ */
+export async function findNarrations(root) {
   const notes = [];
+  const home = path.join(root, "screenplays");
+  for (const file of (await markdownUnder(home)).sort()) {
+    const folder = path.relative(home, file).split(path.sep);
+    notes.push(await describe(file, root, folder.length > 1 ? folder[0] : null));
+  }
   for (const vault of vaults()) {
-    for (const file of await markdownUnder(vault)) {
-      const title = titleOf(await readFile(file, "utf8"));
-      if (title) notes.push({ title, name: slug(title), file });
+    for (const file of (await markdownUnder(vault)).sort()) {
+      if (titleOf(await readFile(file, "utf8"))) notes.push(await describe(file, root, null));
     }
   }
   return notes;
 }
 
-/** Resolve what the user typed: a file path, or the title or name of a narration note. */
-export async function resolveNarration(wanted) {
+/** Resolve what the user typed: a file path, or a narration's demo name, title, or file name. */
+export async function resolveNarration(wanted, root) {
+  const notes = await findNarrations(root);
   if (existsSync(wanted)) {
-    const title = titleOf(await readFile(wanted, "utf8"));
-    if (!title) throw new Error(`${wanted} is not a narration: its first line must be "# Screenplay: <title>"`);
-    return { title, name: slug(title), file: path.resolve(wanted) };
+    const file = path.resolve(wanted);
+    return notes.find((note) => note.file === file) ?? describe(file, root, null);
   }
-  const notes = await findNarrations();
-  const match = notes.filter((note) => note.name === slug(wanted) || note.title.toLowerCase() === wanted.toLowerCase());
+  const key = wanted.toLowerCase();
+  const match = notes.filter((note) => [note.name, note.title, path.basename(note.file, ".md")].some((label) => label.toLowerCase() === key || slug(label) === slug(wanted)));
   if (match.length === 1) return match[0];
-  if (match.length > 1) throw new Error(`more than one narration is called "${wanted}":\n${match.map((note) => `  ${note.file}`).join("\n")}`);
-  throw new Error(`no narration called "${wanted}". Found: ${notes.map((note) => note.name).join(", ") || "none"}. A narration is a note whose first line is "# Screenplay: <title>".`);
+  if (match.length > 1) throw new Error(`more than one narration answers to "${wanted}". Name one by its path:\n${match.map((note) => `  ${note.file}`).join("\n")}`);
+  throw new Error(`no narration called "${wanted}". Found: ${notes.map((note) => note.name).join(", ") || "none"}`);
 }
 
 // What the demo vault holds, so "the tiramisu recipe" can become a real note
@@ -157,7 +183,7 @@ function ask(systemPrompt, messages) {
 export async function draft({ narration, root, omakaseRoot, actions, app, validate, perform, force = false, log = console.log }) {
   const dir = path.join(root, "screenplays", narration.name);
   const file = path.join(dir, "screenplay.yaml");
-  if (existsSync(file) && !force && !(await readFile(file, "utf8")).startsWith(DRAFTED)) {
+  if (existsSync(file) && !force && !isDrafted(await readFile(file, "utf8"))) {
     throw new Error(`${file} was written by hand. Pass --force to replace it with a draft.`);
   }
   const text = await readFile(narration.file, "utf8");
@@ -167,8 +193,11 @@ export async function draft({ narration, root, omakaseRoot, actions, app, valida
   const prompt = system({ actions, vault: await describeVault(vaultDir), vaultPath, tracks });
 
   await mkdir(dir, { recursive: true });
-  // The narration is kept beside its screenplay, so the pair can be read and diffed together.
-  await writeFile(path.join(dir, "narration.md"), text);
+  // The narration stays where its author put it, under its own name. The
+  // screenplay records which file it came from and that file's digest, which
+  // is how a later change to the narration is noticed.
+  const inside = !path.relative(root, narration.file).startsWith("..");
+  const source = `# Narration: ${inside ? path.relative(root, narration.file) : narration.file} sha256:${digest(text)}`;
   // Edits point at scene and step names. A new draft must not rename what
   // the narration did not change, or it would silently orphan them.
   const previous = existsSync(file) ? (await readFile(file, "utf8")).split("\n").filter((line) => !line.startsWith("# ")).join("\n") : null;
@@ -177,7 +206,7 @@ export async function draft({ narration, root, omakaseRoot, actions, app, valida
   for (let attempt = 1; ; attempt++) {
     log(attempt === 1 ? "drafting..." : `repairing (attempt ${attempt})...`);
     reply = ask(prompt, messages);
-    await writeFile(file, `${DRAFTED}\n# Source: ${narration.file}\n${reply.yaml}`);
+    await writeFile(file, `${DRAFTED}\n${source}\n${reply.yaml}`);
     let problem = null;
     try {
       await validate(file);

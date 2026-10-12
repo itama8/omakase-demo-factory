@@ -21,3 +21,5 @@ Search the vault again, this time for rule of 72, and land on the long investing
 Now stay inside that note. Find moat, step down through three matches, and jump to one.
 
 Camera out to the full window. Search the vault for demo end and land on the finale note. Hold on it for a moment.
+
+[[screenplays/test.md]]
