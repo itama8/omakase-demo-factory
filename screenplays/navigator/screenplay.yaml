@@ -1,0 +1,54 @@
+# Drafted from a narration. Edit the narration and draft again; delete this line to edit by hand.
+# Narration: /home/a2ajinkya/.config/Electron/vault/daily/navigator.md sha256:63a3b9cfdfe4
+title: Navigator
+vault: demo-notes
+setup:
+  - keystroke-hud: on
+  - sidebar: closed
+  - pause: 4s
+scenes:
+  - name: welcome-text
+    steps:
+      - pause: 1s
+      - type: |-
+          # Welcome to Omakase
+          # this is notes
+
+          ### Press Ctrl + Shift + Space for the Navigator
+      - pause: 1.2s
+  - name: open-launcher
+    steps:
+      - navigator: day
+        moves: "left 5"
+        gap: 330ms
+      - navigator: day
+        moves: "left 3"
+        gap: 700ms
+      - navigator: day
+        closeup: calendar
+        moves: "left 12"
+        gap: 650ms
+      - navigator: day
+        moves: "down 3"
+        then: open
+        lands: tiramisu
+      - pause: 1.3s
+  - name: launcher-week-mode
+    steps:
+      - navigator: week
+        moves: "next-week 2, right 2"
+        gap: 600ms
+      - navigator: week
+        closeup: day
+        moves: "down 2"
+        gap: 800ms
+        then: open
+        lands: obsidian-vs-notion-two-philosophies
+      - pause: 1.3s
+  - name: search-to-the-end
+    steps:
+      - navigator: day
+        search: demo end
+        then: open
+        lands: demo-end
+      - pause: 3s

@@ -24,6 +24,7 @@ const SYMBOLS = { "`": ["Backquote", 192], "-": ["Minus", 189], "=": ["Equal", 1
 /** The physical key that produces `char`, and whether Shift is held. */
 export function keyFor(char) {
   if (char === "\n") return { key: "Enter", code: "Enter", vk: 13, shift: false, text: "\r" };
+  if (char === "Space") return keyFor(" ");
   if (char in NAMED) return { key: char, code: char, vk: NAMED[char], shift: false };
   if (/^[a-z]$/i.test(char)) return { key: char, code: `Key${char.toUpperCase()}`, vk: char.toUpperCase().charCodeAt(0), shift: char !== char.toLowerCase(), text: char };
   if (/^\d$/.test(char)) return { key: char, code: `Digit${char}`, vk: char.charCodeAt(0), shift: false, text: char };
@@ -86,13 +87,27 @@ function startRecording({ display, width, height, fps, file }) {
 }
 
 async function seedVault(source, vault) {
-  for (const entry of await readdir(source, { withFileTypes: true })) {
+  // The app dates a note by when its file was made, which here is this
+  // minute for every note. A vault that was written over a few weeks has
+  // days to browse, so date the notes back from yesterday: three that day,
+  // then one a day with every third day off.
+  const created = {};
+  const noon = new Date().setHours(12, 0, 0, 0);
+  let count = 0;
+  for (const entry of (await readdir(source, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name))) {
     if (!entry.isDirectory()) continue;
-    const notes = (await readdir(path.join(source, entry.name))).filter((name) => name.endsWith(".md"));
+    const notes = (await readdir(path.join(source, entry.name))).filter((name) => name.endsWith(".md")).sort();
     if (!notes.length) continue;
     await mkdir(path.join(vault, entry.name), { recursive: true });
-    for (const note of notes) await cp(path.join(source, entry.name, note), path.join(vault, entry.name, note));
+    for (const note of notes) {
+      await cp(path.join(source, entry.name, note), path.join(vault, entry.name, note));
+      const daysAgo = count < 3 ? 1 : count - 1 + Math.floor((count - 2) / 3);
+      created[path.join(vault, entry.name, note)] = noon - daysAgo * 86_400_000 - count * 60_000;
+      count += 1;
+    }
   }
+  await mkdir(path.join(vault, ".omakase", "state"), { recursive: true });
+  await writeFile(path.join(vault, ".omakase", "state", "note-order.json"), JSON.stringify(created, null, 2));
 }
 
 /**
@@ -211,7 +226,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
         }
         stage.beat("type-end", { box: await where() });
       },
-      /** A key combination such as "Ctrl+Shift+F", pressed the way a hand does: modifiers first. */
+      /** A key combination such as "Ctrl+Shift+F", pressed the way a hand does: modifiers first. The camera goes to `watch`; pass null to leave it where it is. */
       async chord(combo, { label = combo, watch = "body > .keystroke-hud-card[popover]" } = {}) {
         const parts = combo.split("+");
         const key = parts.pop();
@@ -219,7 +234,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
         for (const mod of parts) { await stage.down(mod); await rest(110 + random() * 60); }
         await stage.stroke(key.length === 1 ? key.toLowerCase() : key, { holdMs: 120 });
         entry.pressed = Number(stage.now().toFixed(3));
-        entry.box = await stage.box(watch);
+        entry.box = watch ? await stage.box(watch) : null;
         await rest(90);
         for (const mod of parts.reverse()) { await stage.up(mod); await rest(40); }
         return entry;

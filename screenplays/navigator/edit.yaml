@@ -1,0 +1,7 @@
+edits:
+  # The opening is the slowest stretch. Let the first line land, then hurry.
+  - speed: 2.2
+    over: welcome-text/type@start+2.5s .. welcome-text/type@end
+  # All three lines fit at this framing, so hold it instead of following the caret.
+  - camera: { on: [0.36, 0.25], zoom: 1.7 }
+    over: welcome-text/pause@start+0.5s .. welcome-text/type@end

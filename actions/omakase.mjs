@@ -18,6 +18,22 @@ const FIND_ACTIVE = "#noteSearchResults .note-search-result.is-active";
 const HUD_CARD = "body > .keystroke-hud-card[popover]";
 const EDITOR_READY = "!!document.querySelector('#cm6EditorHost .cm-content') && !!document.querySelector('.note-item.active')";
 const NOTE_NAME = "document.getElementById('noteNameBtn').textContent.trim()";
+const LAUNCHER_OPEN = "!document.getElementById('commandPalette').classList.contains('hidden')";
+const LAUNCHER_CARD = "#commandPalette .command-palette-card";
+const LAUNCHER_INPUT = "#commandPaletteInput";
+const LAUNCHER_ACTIVE = "#commandPaletteList .command-palette-item.is-active";
+const NAVIGATOR_OPEN = "!document.getElementById('noteNavigator').classList.contains('hidden')";
+const NAVIGATOR_SHELL = "#noteNavigator .note-navigator-shell";
+const NAVIGATOR_LAYOUT = "document.getElementById('noteNavigatorCalendar').dataset.level";
+// Everything a move can change: the layout, the calendar's day, and the selected note.
+const NAVIGATOR_AT = `(() => {
+  const calendar = document.getElementById('noteNavigatorCalendar');
+  const label = (id) => document.getElementById(id).getAttribute('aria-label');
+  return [calendar.dataset.level, calendar.dataset.day, label('noteNavigatorPrevious'), label('noteNavigatorNext'), document.querySelector('.note-navigator-week-card[aria-current="true"]')?.textContent ?? ''].join('|');
+})()`;
+const NAVIGATOR_KEYWORD = "#noteNavigatorKeyword";
+const NAVIGATOR_CLOSEUPS = { calendar: "#noteNavigatorCalendar", day: '#noteNavigatorWeekDays .note-navigator-day[data-selected="true"]' };
+const NAVIGATOR_KEYS = { left: "ArrowLeft", right: "ArrowRight", up: "ArrowUp", down: "ArrowDown" };
 const SCOPES = { vault: { combo: "Ctrl+Shift+F", label: "Whole vault" }, note: { combo: "Ctrl+F", label: "Current note" } };
 const quote = (value) => JSON.stringify(value);
 
@@ -99,6 +115,104 @@ export const actions = {
       await stage.pause(350);
       stage.beat("land", { query, box: await stage.caret() });
       await stage.shot(`land ${query}`);
+    }
+  },
+
+  launcher: {
+    summary: "Open the launcher with Ctrl+L, type a command's name, and run it. \"Open Navigator\" opens the note browser.",
+    args: {
+      value: { type: "text", required: true, doc: "the command's name as the launcher lists it, such as Open Navigator" },
+      wpm: { type: "number", default: 48 }
+    },
+    async run(stage, { value: command, wpm }) {
+      await stage.chord("Ctrl+L", { watch: HUD_CARD });
+      await stage.until("the launcher opens", LAUNCHER_OPEN);
+      await stage.show("modal", LAUNCHER_CARD);
+      await stage.pause(450);
+      await stage.type(command, { where: () => stage.box(LAUNCHER_INPUT), wpm });
+      await stage.until(`the launcher offers ${command}`, `document.querySelector(${quote(`${LAUNCHER_ACTIVE} .command-palette-item-title`)})?.textContent.trim().toLowerCase() === ${quote(command.toLowerCase())}`);
+      await stage.show("select", LAUNCHER_ACTIVE);
+      await stage.pause(700);
+      await stage.stroke("Enter");
+      await stage.until("the launcher closes", `!(${LAUNCHER_OPEN})`);
+    }
+  },
+
+  navigator: {
+    summary: "Browse notes in the navigator: pages by day, or a calendar by week. Opens it with Ctrl+Shift+Space unless it is already open, and stays in it until a step says open. The camera fills the picture with it and does not go to the keys.",
+    args: {
+      value: { type: "enum", values: ["day", "week"], required: true, doc: "the layout; switching presses d or w" },
+      closeup: { type: "enum", values: ["calendar", "day"], doc: "hold the camera close for this step: on the calendar icon, whose marker moves with the selected day, or by week on the selected day's column. It pulls back when the step ends" },
+      search: { type: "text", doc: "by day: press s, type this keyword filter, and return to the pages. Done before the moves. The selected page must then contain it" },
+      moves: { type: "text", doc: "arrow keys in order, such as \"left 3, right, down 2\". By day, left and right turn to the older and newer note, and up and down scroll the page. By week, left and right move a day, up and down pick among that day's notes, and previous-week and next-week jump seven days. A move that changes nothing fails, except a scroll" },
+      gap: { type: "duration", default: 0.7, doc: "pause after each move" },
+      then: { type: "enum", values: ["stay", "open"], default: "stay", doc: "open presses Enter on the selected note and leaves the navigator, as the camera pulls back to the whole window" },
+      lands: { type: "text", doc: "with open: name of the note that must end up open" }
+    },
+    async run(stage, { value: layout, closeup, search, moves, gap, then, lands }) {
+      const strokes = (moves ?? "").split(",").map((move) => move.trim()).filter(Boolean).flatMap((move) => {
+        const [, direction, count = "1"] = move.match(/^(left|right|up|down|previous-week|next-week)(?:\s+(\d+))?$/i) ?? [];
+        if (!direction) throw new Error(`navigator: "${move}" is not a move. Write a direction and an optional count, such as "left 3"`);
+        return Array(Number(count)).fill(direction.toLowerCase());
+      });
+      if (!(await stage.app.evaluate(NAVIGATOR_OPEN))) {
+        // The keys are not the subject here, so the camera stays where it is.
+        await stage.chord("Ctrl+Shift+Space", { watch: null });
+        await stage.until("the navigator opens", NAVIGATOR_OPEN);
+        // Take it in for a beat, then move in until it fills the picture.
+        await stage.pause(600);
+        await stage.show("fill", NAVIGATOR_SHELL);
+        await stage.pause(900);
+      }
+      if ((await stage.app.evaluate(NAVIGATOR_LAYOUT)) !== layout) {
+        await stage.stroke(layout[0]);
+        await stage.until(`the navigator shows the ${layout}`, `${NAVIGATOR_LAYOUT} === ${quote(layout)}`);
+        await stage.pause(gap * 1000);
+      }
+      if (search) {
+        await stage.stroke("s");
+        await stage.until("the keyword filter takes focus", `document.activeElement === document.querySelector(${quote(NAVIGATOR_KEYWORD)})`);
+        await stage.pause(350);
+        await stage.type(search, { where: () => stage.box(NAVIGATOR_KEYWORD), wpm: 48 });
+        await stage.until(`the navigator finds ${search}`, `document.getElementById('noteNavigatorCurrent').textContent.toLowerCase().includes(${quote(search.toLowerCase())})`);
+        await stage.pause(900);
+        await stage.stroke("Enter");
+        await stage.until("the pages take focus back", `document.activeElement !== document.querySelector(${quote(NAVIGATOR_KEYWORD)})`);
+        await stage.pause(gap * 1000);
+      }
+      if (closeup) {
+        if (closeup === "day" && layout !== "week") throw new Error("navigator: \"closeup: day\" frames a day's column, which only the week layout has");
+        await stage.show("closeup", NAVIGATOR_CLOSEUPS[closeup]);
+        await stage.pause(1100);
+      }
+      for (const direction of strokes) {
+        const scrolls = layout === "day" && (direction === "up" || direction === "down");
+        const before = await stage.app.evaluate(NAVIGATOR_AT);
+        if (direction.endsWith("-week")) {
+          await stage.down("Ctrl");
+          await stage.stroke(direction === "next-week" ? "ArrowRight" : "ArrowLeft");
+          await stage.up("Ctrl");
+        } else {
+          await stage.stroke(NAVIGATOR_KEYS[direction]);
+        }
+        // A scroll at the end of a page moves nothing, and that is fine.
+        if (!scrolls) await stage.until(`${direction} moves the navigator`, `${NAVIGATOR_AT} !== ${quote(before)}`, { timeoutMs: 3000 });
+        await stage.pause(gap * 1000);
+      }
+      await stage.shot(`navigator ${layout}`);
+      if (then !== "open") {
+        if (closeup) await stage.show("fill", NAVIGATOR_SHELL);
+        return;
+      }
+      // The note opens where it was last read, so there is no caret to frame:
+      // pull back to the whole window as the navigator gives way to it.
+      stage.beat("land");
+      await stage.stroke("Enter");
+      await stage.until("the navigator closes", `!(${NAVIGATOR_OPEN})`);
+      if (lands) await stage.until(`the navigator lands in ${lands}`, `${NOTE_NAME} === ${quote(lands)}`);
+      await stage.until("the note is ready", EDITOR_READY);
+      await stage.pause(350);
+      await stage.shot(`land ${lands ?? "note"}`);
     }
   },
 

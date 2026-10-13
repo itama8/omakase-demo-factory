@@ -42,16 +42,6 @@
         width: 240px;
         height: 240px;
       }
-      #logo-word {
-        display: block;
-        width: 600px;
-        text-align: center;
-        font-family: "Plex Serif", Georgia, serif;
-        font-size: 76px;
-        line-height: 1.1;
-        letter-spacing: 0.04em;
-        color: #cde1e4;
-      }
       /* #app carries the seam, #camera carries the shots. The videos are the
          timed clips, so neither wrapper may be timed. */
       #app,
@@ -87,7 +77,6 @@
       </div>
       <section id="logo" class="clip" data-start="0" data-duration="__LOGO__" data-track-index="1">
         <img id="logo-mark" src="assets/icon.png" alt="" />
-        <div id="logo-word">omakase</div>
       </section>
       <div id="curtain"></div>
       __AUDIO__
@@ -101,7 +90,6 @@
 
       // --- Logo, in silence. One seam: a push through the mark into the app.
       tl.fromTo("#logo-mark", { opacity: 0, y: 36 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.25);
-      tl.fromTo("#logo-word", { opacity: 0, y: 28 }, { opacity: 1, y: 0, duration: 0.7, ease: "power3.out" }, 0.43);
       tl.fromTo("#logo", { scale: 1 }, { scale: 1.32, duration: 0.42, ease: "power4.in" }, CUT - 0.42);
       tl.fromTo("#logo", { opacity: 1 }, { opacity: 0, duration: 0.2, ease: "power1.in" }, CUT - 0.2);
       tl.fromTo("#app", { scale: 0.9, transformOrigin: "50% 50%" }, { scale: 1, duration: 0.6, ease: "power4.out" }, CUT);
