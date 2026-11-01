@@ -79,7 +79,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   const dir = path.dirname(file);
   const doc = parse(await readFile(file, "utf8"));
   if (!doc || typeof doc !== "object") throw new Error(`${file} is empty`);
-  const known = new Set(["title", "vault", "music", "seed", "setup", "scenes"]);
+  const known = new Set(["title", "vault", "music", "seed", "sushi", "setup", "scenes"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) throw new Error(`${file}: unknown key "${key}". Known: ${[...known].join(", ")}`);
   if (!Array.isArray(doc.scenes) || !doc.scenes.length) throw new Error(`${file}: needs at least one scene`);
 
@@ -92,6 +92,14 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   });
   const setup = compileSteps(doc.setup ?? [], { actions, where: "setup", setup: true, dir });
   const name = path.basename(dir);
+  // "sushi: replies.mjs" scripts the model: `respond(request, { count, rest })`
+  // returns a reply for the fake provider, and an optional `setup(profile)`
+  // runs before launch. The same module is what `custom` steps import.
+  let sushi = null;
+  if (doc.sushi) {
+    sushi = await import(pathToFileURL(path.resolve(dir, String(doc.sushi))).href);
+    if (typeof sushi.respond !== "function") throw new Error(`${file}: ${doc.sushi} must export respond(request, helpers)`);
+  }
 
   return {
     name,
@@ -102,6 +110,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
     scenario: {
       name,
       vault: path.resolve(omakaseRoot, doc.vault ?? app.defaultVault),
+      sushi,
       async prepare(stage) { for (const step of setup) await step.run(stage); },
       async perform(stage) {
         for (const scene of scenes) {

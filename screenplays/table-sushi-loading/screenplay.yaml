@@ -1,0 +1,20 @@
+title: Asking a table
+vault: ../omakase-demo-factory/screenplays/table-sushi-loading/vault
+sushi: replies.mjs
+
+setup:
+  # No key card: it would sit over the Sushi card while the question is typed.
+  - sidebar: closed
+  - find: Option 6 sewage
+    lands: EQ01 Option 6 sewage
+  - custom: replies.mjs#attachPdf
+  - pause: 3s
+
+scenes:
+  - name: ask
+    steps:
+      - pause: 1s
+      - table-sushi: Is D7 sized on DWF or 3x DWF?
+        lift: 70
+        answer: Priced on 3×DWF
+      - pause: 4s

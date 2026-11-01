@@ -141,11 +141,25 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
 
   const random = mulberry32(seed);
   const beats = [];
-  let app, recording, clock = null;
+  let app, recording, sushi, clock = null;
   try {
+    // Sushi scenes answer from a scripted local model server instead of a
+    // real provider: the demo profile has no credentials. The real runtime
+    // still runs every tool the script calls.
+    if (scenario.sushi) {
+      const { startFakeModelProvider, configureFakeModelProvider } = await import(pathToFileURL(path.join(omakaseRoot, "scripts/fixtures/fake-model-provider.mjs")).href);
+      sushi = { script: scenario.sushi, configure: configureFakeModelProvider };
+      sushi.server = await startFakeModelProvider((request, count) => scenario.sushi.respond(request, { count, pace, rest: (ms) => rest(ms) ?? Promise.resolve() }));
+    }
     app = await launchApp({
       prefix: "omakase-demo-", main: true, args: [`--force-device-scale-factor=${scale}`],
-      setup: (profile) => scenario.vault ? seedVault(scenario.vault, path.join(profile, "vault")) : undefined
+      setup: async (profile) => {
+        if (scenario.vault) await seedVault(scenario.vault, path.join(profile, "vault"));
+        if (sushi) {
+          await sushi.configure(profile, sushi.server.baseUrl);
+          await sushi.script.setup?.(profile);
+        }
+      }
     });
     await app.evaluateMain(`${electronExpression}.BrowserWindow.getAllWindows()[0].setBounds({ x: 0, y: 0, width: ${width}, height: ${height} }), true`);
     // A recording needs the window to cover the screen exactly. A check only
@@ -255,6 +269,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
   } finally {
     await recording?.stop();
     await app?.close().catch((error) => console.error(`Teardown: ${error.message}`));
+    await sushi?.server?.close();
     screen.stop();
     lock.release();
   }

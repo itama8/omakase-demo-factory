@@ -35,6 +35,7 @@ const NAVIGATOR_KEYWORD = "#noteNavigatorKeyword";
 const NAVIGATOR_CLOSEUPS = { calendar: "#noteNavigatorCalendar", day: '#noteNavigatorWeekDays .note-navigator-day[data-selected="true"]' };
 const NAVIGATOR_KEYS = { left: "ArrowLeft", right: "ArrowRight", up: "ArrowUp", down: "ArrowDown" };
 const SCOPES = { vault: { combo: "Ctrl+Shift+F", label: "Whole vault" }, note: { combo: "Ctrl+F", label: "Current note" } };
+const TABLE_SUSHI_PANEL = ".table-sushi-panel";
 const quote = (value) => JSON.stringify(value);
 
 export const actions = {
@@ -213,6 +214,119 @@ export const actions = {
       await stage.until("the note is ready", EDITOR_READY);
       await stage.pause(350);
       await stage.shot(`land ${lands ?? "note"}`);
+    }
+  },
+
+  "table-sushi": {
+    summary: "Ask Sushi about a table: click a cell, open table Sushi, type the question, and hold on the card until the answer lands.",
+    args: {
+      value: { type: "text", required: true, doc: "the question" },
+      row: { type: "number", default: 1, doc: "body row of the cell to start from, counting the header as 0" },
+      column: { type: "number", default: 0, doc: "column of that cell, from 0" },
+      lift: { type: "number", doc: "after the click, scroll so the table's top sits this many pixels below the editor's top, leaving room for the card" },
+      wpm: { type: "number", default: 56 },
+      answer: { type: "text", doc: "text the finished answer must contain" }
+    },
+    async run(stage, { value, row, column, lift, wpm, answer }) {
+      const cell = `.cm-table-inline [data-cell-row="${row}"][data-table-col-index="${column}"]`;
+      await stage.until("the table is drawn", `!!document.querySelector(${quote(cell)})`);
+      await stage.app.click(cell);
+      await stage.pause(450);
+      // Clicking scrolls the caret into view, so the table is lifted afterwards.
+      if (lift !== undefined) {
+        await stage.app.evaluate(`(() => {
+          const scroller = document.querySelector('#cm6EditorHost .cm-scroller');
+          const top = document.querySelector('.cm-table-inline').getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+          scroller.scrollTo({ top: scroller.scrollTop + top - ${lift}, behavior: 'smooth' });
+          return true;
+        })()`);
+        await stage.until("the table is lifted", `Math.abs(document.querySelector('.cm-table-inline').getBoundingClientRect().top - document.querySelector('#cm6EditorHost .cm-scroller').getBoundingClientRect().top - ${lift}) < 4`);
+        await stage.pause(300);
+      }
+      // Table Sushi is w held with d pressed twice.
+      const w = { key: "w", code: "KeyW", vk: 87 };
+      stage.beat("chord", { label: "W + D D", box: await stage.box(HUD_CARD) });
+      await stage.app.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", windowsVirtualKeyCode: w.vk, text: "w" });
+      await stage.pause(160);
+      await stage.stroke("d");
+      await stage.pause(120);
+      await stage.stroke("d");
+      await stage.app.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW", windowsVirtualKeyCode: w.vk });
+      await stage.until("the table Sushi prompt has focus", "document.activeElement?.classList.contains('table-sushi-prompt')");
+      await stage.show("modal", TABLE_SUSHI_PANEL);
+      await stage.pause(300);
+      await stage.type(value, { wpm, where: () => stage.box(TABLE_SUSHI_PANEL), label: value });
+      await stage.pause(350);
+      await stage.stroke("Enter");
+      await stage.until("the card starts working", `!!document.querySelector('${TABLE_SUSHI_PANEL} .cm-invocation-card-loading')`);
+      await stage.show("modal", TABLE_SUSHI_PANEL);
+      await stage.shot("table sushi working");
+      await stage.app.until("the answer lands", () => stage.app.evaluate(`document.querySelector(${quote(TABLE_SUSHI_PANEL)})?.dataset.phase === 'answer'`), { timeoutMs: 60_000 });
+      if (answer) await stage.until("the answer reads as scripted", `document.querySelector('.table-sushi-answer')?.textContent.includes(${quote(answer)})`);
+      await stage.show("modal", TABLE_SUSHI_PANEL);
+      await stage.shot("table sushi answer");
+    }
+  },
+
+  "note-sushi": {
+    summary: "Ask Sushi in the note: put the caret on the line after one that contains `after`, open the prompt, type the question, and hold on the card until the answer is written.",
+    args: {
+      value: { type: "text", required: true, doc: "the question" },
+      after: { type: "text", required: true, doc: "text on the line just above where the caret goes" },
+      lift: { type: "number", doc: "scroll so the caret sits this many pixels below the editor's top, leaving room for the card" },
+      wpm: { type: "number", default: 56 },
+      answer: { type: "text", doc: "text the finished answer must contain" },
+      press: { type: "text", doc: "a key combination to press while the card works, such as Ctrl+Alt+L" },
+      times: { type: "number", default: 1, doc: "how many times to press it" },
+      every: { type: "duration", default: 3, doc: "time between presses, and before the first" }
+    },
+    async run(stage, { value, after, lift, wpm, answer, press, times, every }) {
+      const placed = await stage.app.view(`(() => {
+        const doc = view.state.doc;
+        for (let n = 1; n < doc.lines; n++) {
+          if (!doc.line(n).text.includes(${quote(after)})) continue;
+          view.dispatch({ selection: { anchor: doc.line(n + 1).from } });
+          view.focus();
+          return true;
+        }
+        return false;
+      })()`);
+      if (!placed) throw new Error(`no line contains ${quote(after)}`);
+      if (lift !== undefined) {
+        await stage.app.evaluate(`(() => {
+          const scroller = document.querySelector('#cm6EditorHost .cm-scroller');
+          const caret = document.querySelector('.cm-cursor')?.getBoundingClientRect().top ?? 0;
+          scroller.scrollTo({ top: scroller.scrollTop + caret - scroller.getBoundingClientRect().top - ${lift}, behavior: 'smooth' });
+          return true;
+        })()`);
+      }
+      await stage.pause(700);
+      // Ask Sushi is w held with d pressed twice.
+      stage.beat("chord", { label: "W + D D", box: null });
+      await stage.app.send("Input.dispatchKeyEvent", { type: "keyDown", key: "w", code: "KeyW", windowsVirtualKeyCode: 87, text: "w" });
+      await stage.pause(160);
+      await stage.stroke("d");
+      await stage.pause(120);
+      await stage.stroke("d");
+      await stage.app.send("Input.dispatchKeyEvent", { type: "keyUp", key: "w", code: "KeyW", windowsVirtualKeyCode: 87 });
+      await stage.until("the Sushi prompt has focus", "document.activeElement?.classList.contains('selected-sushi-composer-input')");
+      await stage.show("modal", ".selected-sushi-composer");
+      await stage.pause(300);
+      await stage.type(value, { wpm, where: () => stage.box(".selected-sushi-composer"), label: value });
+      await stage.pause(350);
+      await stage.stroke("Enter");
+      await stage.until("the card starts working", "!!document.querySelector('.cm-invocation-card .cm-invocation-card-loading')");
+      await stage.show("modal", ".cm-invocation-card");
+      await stage.shot("note sushi working");
+      for (let count = 0; press && count < times; count++) {
+        await stage.pause(every * 1000);
+        await stage.chord(press, { watch: null });
+        await stage.shot(`note sushi working ${count + 2}`);
+      }
+      await stage.app.until("the answer is written", () => stage.app.evaluate(`document.querySelector('.cm-invocation-card')?.dataset.phase === 'done'`), { timeoutMs: 60_000 });
+      if (answer) await stage.until("the answer reads as scripted", `document.querySelector('#cm6EditorHost .cm-content').textContent.includes(${quote(answer)})`);
+      await stage.show("modal", ".cm-invocation-card");
+      await stage.shot("note sushi answer");
     }
   },
 
