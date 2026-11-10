@@ -11,9 +11,13 @@
     <header>
       <a class="brand" href="/">Omakase <span>/ demo room</span></a>
       <div>
-        <button id="reload">Reload</button
-        ><button id="export" class="primary">Export MP4</button
-        ><a id="download" href="/download" hidden>Download MP4 ↓</a>
+        <label class="inline"
+          >Take<select id="take" title="Switch to another kept take"></select></label
+        ><button id="reload">Reload</button
+        ><label class="inline"
+          >Format<select id="preset" title="Export format"></select></label
+        ><button id="export" class="primary">Export</button
+        ><a id="download" href="/download" hidden>Download ↓</a>
       </div>
     </header>
     <main>
@@ -37,7 +41,7 @@
                   <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
                 </svg></button
               ><output id="clock">0:00 / 0:00</output
-              ><label><input id="sound" type="checkbox" /> Music</label>
+              ><label><input id="sound" type="checkbox" /> Sound</label>
             </div>
             <div id="timeline" aria-label="Scene and step timeline">
               <input

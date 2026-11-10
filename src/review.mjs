@@ -7,11 +7,13 @@ import path from "node:path";
 import { parse, parseDocument } from "yaml";
 import { compileEdit, spansOf } from "./edit.mjs";
 import { planFilm } from "./film.mjs";
+import { exportFile, PRESETS } from "./export.mjs";
+import { listTakes, useTake } from "./takes.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const missing = (error) => { if (error.code === "ENOENT") return ""; throw error; };
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
-const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".mp4": "video/mp4", ".m4a": "audio/mp4", ".png": "image/png", ".ttf": "font/ttf" };
+const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".mp4": "video/mp4", ".m4a": "audio/mp4", ".png": "image/png", ".ttf": "font/ttf", ".webm": "video/webm", ".gif": "image/gif" };
 
 /** Local editable review, deliberately independent of a particular model CLI. */
 export async function serveReview({ root, name, build, port = 0, renderCommand }) {
@@ -23,7 +25,7 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
     const take = JSON.parse(takeText), document = parse(source) ?? { edits: [] };
     const film = planFilm(take, compileEdit(document, take.beats));
     const revision = hash(source + takeText);
-    return { name, revision, edits: document.edits ?? [], spans: spansOf(take.beats), film, job: { ...job, current: job.revision === revision }, source };
+    return { name, revision, edits: document.edits ?? [], spans: spansOf(take.beats), film, takes: await listTakes(out), presets: Object.fromEntries(Object.entries(PRESETS).map(([id, preset]) => [id, preset.summary])), job: { ...job, current: job.revision === revision }, source };
   };
   // Fail before announcing a link if there is no usable take.
   await readState();
@@ -95,15 +97,36 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
         } finally { busy = false; }
         return;
       }
+      if (req.method === "POST" && url.pathname === "/api/take") {
+        if (busy) throw fail("An export or save is running. Try again when it finishes.", 409);
+        busy = true;
+        try {
+          const data = await body(req), current = await readState();
+          if (data.revision !== current.revision) throw fail("This demo changed. Reload before switching takes.", 409);
+          if (!current.takes.some((take) => take.id === data.id)) throw fail("No such take", 404);
+          // The saved edits must still name spans the other take has.
+          const candidate = JSON.parse(await readFile(path.join(out, "takes", data.id, "take.json"), "utf8"));
+          try { planFilm(candidate, compileEdit(parse(current.source) ?? { edits: [] }, candidate.beats)); }
+          catch (error) { throw fail(`That take does not fit the saved edits: ${error.message}`, 409); }
+          const before = current.takes.find((take) => take.current)?.id;
+          await useTake(out, data.id);
+          try { await build(); }
+          catch (error) { if (before) { await useTake(out, before); await build().catch(() => {}); } throw error; }
+          const { source, ...state } = await readState(); json(res, 200, state);
+        } finally { busy = false; }
+        return;
+      }
       if (req.method === "POST" && url.pathname === "/api/render") {
         if (busy) throw fail("An export or save is already running", 409);
         busy = true;
         try {
           const data = await body(req), state = await readState();
           if (data.revision !== state.revision) throw fail("Reload the latest edit before exporting", 409);
+          const preset = data.preset ?? "1080p";
+          if (!PRESETS[preset]) throw fail("Unknown export preset");
           await build();
-          job = { state: "running", revision: state.revision, log: "" };
-          const command = renderCommand ?? [process.execPath, path.join(root, "bin/demo.mjs"), "render", name];
+          job = { state: "running", revision: state.revision, preset, log: "" };
+          const command = renderCommand ?? [process.execPath, path.join(root, "bin/demo.mjs"), "render", name, "--preset", preset];
           child = spawn(command[0], command.slice(1), { cwd: root, stdio: ["ignore", "pipe", "pipe"] });
           const log = (data) => { job.log = (job.log + data).slice(-12_000); };
           child.stdout.on("data", log); child.stderr.on("data", log);
@@ -120,8 +143,9 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
       if (url.pathname === "/download") {
         const state = await readState();
         if (job.state !== "ready" || job.revision !== state.revision) throw fail("Export the current edit first", 409);
-        res.setHeader("Content-Disposition", `attachment; filename="${name}.mp4"`);
-        return await sendFile(req, res, path.join(out, `${name}.mp4`), out);
+        const file = exportFile(out, name, job.preset ?? "1080p");
+        res.setHeader("Content-Disposition", `attachment; filename="${path.basename(file)}"`);
+        return await sendFile(req, res, file, out);
       }
       throw fail("Not found", 404);
     } catch (error) {

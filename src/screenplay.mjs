@@ -79,7 +79,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   const dir = path.dirname(file);
   const doc = parse(await readFile(file, "utf8"));
   if (!doc || typeof doc !== "object") throw new Error(`${file} is empty`);
-  const known = new Set(["title", "vault", "music", "seed", "sushi", "appearance", "setup", "scenes"]);
+  const known = new Set(["title", "vault", "music", "seed", "sushi", "appearance", "capture", "sfx", "setup", "scenes"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) throw new Error(`${file}: unknown key "${key}". Known: ${[...known].join(", ")}`);
   if (!Array.isArray(doc.scenes) || !doc.scenes.length) throw new Error(`${file}: needs at least one scene`);
 
@@ -92,6 +92,13 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   });
   const setup = compileSteps(doc.setup ?? [], { actions, where: "setup", setup: true, dir });
   const name = path.basename(dir);
+  // "capture: { fps: 60, scale: 2 }" sets how the take is filmed. The window
+  // is 1280x720; scale 3 records it at 3840x2160, which stays sharp to a 2x zoom.
+  const capture = doc.capture ?? {};
+  if (typeof capture !== "object" || Array.isArray(capture) || Object.keys(capture).some((key) => !["fps", "scale"].includes(key))) throw new Error(`${file}: capture takes fps and scale`);
+  if (capture.fps !== undefined && ![24, 25, 30, 50, 60].includes(capture.fps)) throw new Error(`${file}: capture.fps must be 24, 25, 30, 50 or 60`);
+  if (capture.scale !== undefined && ![1, 1.5, 2, 3].includes(capture.scale)) throw new Error(`${file}: capture.scale must be 1, 1.5, 2 or 3`);
+  if (doc.sfx !== undefined && typeof doc.sfx !== "boolean") throw new Error(`${file}: sfx must be true or false`);
   // "sushi: replies.mjs" scripts the model: `respond(request, { count, rest })`
   // returns a reply for the fake provider, and an optional `setup(profile)`
   // runs before launch. The same module is what `custom` steps import.
@@ -107,6 +114,9 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
     title: doc.title ?? name,
     music: doc.music ? path.resolve(omakaseRoot, doc.music) : null,
     seed: doc.seed ?? 7,
+    capture: { fps: capture.fps ?? 60, scale: capture.scale ?? 2 },
+    sfx: doc.sfx ?? false,
+    scenes: scenes.map((scene) => scene.name),
     spans: scenes.flatMap((scene) => [scene.name, ...scene.steps.map((step) => step.id)]),
     scenario: {
       name,
@@ -121,8 +131,11 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
         return actions[name].run(stage, args);
       },
       async prepare(stage) { for (const step of setup) await step.run(stage); },
-      async perform(stage) {
-        for (const scene of scenes) {
+      /** Every scene, or only the scenes before one, or only that one. */
+      async perform(stage, { before, only } = {}) {
+        const at = scenes.findIndex((scene) => scene.name === (before ?? only));
+        if ((before ?? only) && at < 0) throw new Error(`No scene named "${before ?? only}". Scenes: ${scenes.map((scene) => scene.name).join(", ")}`);
+        for (const scene of before ? scenes.slice(0, at) : only ? [scenes[at]] : scenes) {
           await stage.span(scene.name, async () => {
             for (const step of scene.steps) await stage.span(step.id, () => step.run(stage));
           });

@@ -55,7 +55,7 @@ function frameOf(value, where) {
 export async function editSpans(file) {
   let doc;
   try { doc = parse(await readFile(file, "utf8")); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
-  const ranges = (doc?.edits ?? []).flatMap((entry) => [entry.cut, entry.over]).filter((value) => typeof value === "string");
+  const ranges = (doc?.edits ?? []).flatMap((entry) => [entry.cut, entry.over, entry.at]).filter((value) => typeof value === "string");
   return [...new Set(ranges.flatMap((text) => text.split("..").map((part) => part.trim().match(/^[a-z0-9-]+(?:\/[a-z0-9-]+)?/)?.[0])).filter(Boolean))];
 }
 
@@ -65,6 +65,17 @@ export async function loadEdit(file, beats) {
   try { doc = parse(await readFile(file, "utf8")); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
   return compileEdit(doc, beats, file);
 }
+
+const KINDS = {
+  cut: [],
+  speed: ["over"],
+  camera: ["over"],
+  caption: ["over", "position"],
+  card: ["at", "for", "subtitle"],
+  highlight: ["over", "style"],
+  keys: ["over", "position"],
+  transition: ["at", "for"]
+};
 
 /** Shared validation for agent-authored YAML and edits saved in the browser. */
 export function compileEdit(doc, beats, file = "edit") {
@@ -76,55 +87,101 @@ export function compileEdit(doc, beats, file = "edit") {
   return list.map((entry, index) => {
     const where = `${file}, edit ${index + 1}`;
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${where}: expected an edit mapping`);
-    const kinds = ["cut", "speed", "camera", "caption"].filter((key) => key in entry);
-    if (kinds.length !== 1) throw new Error(`${where}: needs exactly one of cut, speed, camera, caption`);
-    const allowed = new Set([kinds[0], ...(kinds[0] === "cut" ? [] : ["over"]), ...(kinds[0] === "caption" ? ["position"] : [])]);
-    for (const key of Object.keys(entry)) if (!allowed.has(key)) throw new Error(`${where}: unknown argument ${key}`);
-    if ("cut" in entry) return { kind: "cut", ...range(entry.cut, spans, where) };
-    if ("speed" in entry) {
+    const kinds = Object.keys(KINDS).filter((key) => key in entry);
+    if (kinds.length !== 1) throw new Error(`${where}: needs exactly one of ${Object.keys(KINDS).join(", ")}`);
+    const [kind] = kinds;
+    for (const key of Object.keys(entry)) if (key !== kind && !KINDS[kind].includes(key)) throw new Error(`${where}: unknown argument ${key}`);
+    const position = (fallback) => {
+      if (entry.position !== undefined && !["top", "bottom"].includes(entry.position)) throw new Error(`${where}: position must be top or bottom`);
+      return entry.position ?? fallback;
+    };
+    const text = (value, what, most) => {
+      if (typeof value !== "string" || value.length > most) throw new Error(`${where}: ${what} must be text, at most ${most} characters`);
+      return value;
+    };
+    // A moment in the take, and how long the film dwells on it.
+    const moment = (fallback, most) => {
+      if (entry.at === undefined || entry.at === null) throw new Error(`${where}: needs a point, such as "at: scene@start"`);
+      const duration = entry.for === undefined ? fallback : seconds(entry.for, `${where}: for`);
+      if (!(duration >= 0.2 && duration <= most)) throw new Error(`${where}: "for" must be between 0.2s and ${most}s`);
+      return { t: point(entry.at, spans, "start", where), duration };
+    };
+    if (kind === "cut") return { kind, ...range(entry.cut, spans, where) };
+    if (kind === "speed") {
       if (typeof entry.speed !== "number" || !Number.isFinite(entry.speed) || !(entry.speed >= 0.1 && entry.speed <= 10)) throw new Error(`${where}: speed must be between 0.1 and 10; got ${entry.speed}`);
-      return { kind: "speed", rate: entry.speed, ...range(entry.over, spans, where) };
+      return { kind, rate: entry.speed, ...range(entry.over, spans, where) };
     }
-    if ("camera" in entry) return { kind: "camera", frame: frameOf(entry.camera, where), ...range(entry.over, spans, where) };
-    if (typeof entry.caption !== "string" || entry.caption.length > 240) throw new Error(`${where}: caption must be text, at most 240 characters`);
-    if (entry.position !== undefined && !["top", "bottom"].includes(entry.position)) throw new Error(`${where}: position must be top or bottom`);
-    return { kind: "caption", text: entry.caption, position: entry.position ?? "bottom", ...range(entry.over, spans, where) };
+    if (kind === "camera") return { kind, frame: frameOf(entry.camera, where), ...range(entry.over, spans, where) };
+    if (kind === "caption") return { kind, text: text(entry.caption, "caption", 240), position: position("bottom"), ...range(entry.over, spans, where) };
+    if (kind === "card") {
+      if (!entry.card) throw new Error(`${where}: a card needs its text`);
+      return { kind, text: text(entry.card, "card", 80), subtitle: entry.subtitle === undefined ? "" : text(entry.subtitle, "subtitle", 160), ...moment(2.2, 10) };
+    }
+    if (kind === "highlight") {
+      const box = Array.isArray(entry.highlight) && entry.highlight.length === 4 ? entry.highlight.map(Number) : null;
+      if (!box || !box.every(Number.isFinite) || box[0] < 0 || box[1] < 0 || box[2] <= 0 || box[3] <= 0 || box[0] + box[2] > 1.0001 || box[1] + box[3] > 1.0001) throw new Error(`${where}: highlight must be [x, y, width, height] as fractions of the window`);
+      if (entry.style !== undefined && !["ring", "spotlight"].includes(entry.style)) throw new Error(`${where}: style must be ring or spotlight`);
+      return { kind, box: { x: box[0], y: box[1], w: box[2], h: box[3] }, style: entry.style ?? "ring", ...range(entry.over, spans, where) };
+    }
+    if (kind === "keys") {
+      if (!entry.keys) throw new Error(`${where}: keys needs a combination such as Ctrl+K`);
+      return { kind, label: text(entry.keys, "keys", 40), position: position("bottom"), ...range(entry.over, spans, where) };
+    }
+    if (entry.transition !== "dip") throw new Error(`${where}: transition must be dip`);
+    return { kind, ...moment(0.5, 2) };
   });
 }
 
 /**
  * Cut the take into the pieces that play, each { a, b, rate, at }: source
- * range, speed, and where it starts in the film. Returns the pieces, the
- * film's length, and `when(t)`, which maps take time to film time.
+ * range, speed, and where it starts in the film. A card holds the film at its
+ * moment, so the pieces after it start later. Returns the pieces, the cards
+ * with their film times, the film's length, and `when(t)`, which maps take
+ * time to film time.
  */
 export function assemble(edits, begin, end) {
-  const marks = [...new Set([begin, end, ...edits.filter((edit) => ["cut", "speed"].includes(edit.kind)).flatMap((edit) => [edit.from, edit.to])])]
+  const holds = edits.filter((edit) => edit.kind === "card").map((edit) => ({ ...edit, t: Math.min(end, Math.max(begin, edit.t)) }));
+  const marks = [...new Set([begin, end, ...holds.map((hold) => hold.t), ...edits.filter((edit) => ["cut", "speed"].includes(edit.kind)).flatMap((edit) => [edit.from, edit.to])])]
     .filter((t) => t >= begin && t <= end).sort((a, b) => a - b);
-  const pieces = [];
-  let at = 0;
-  for (let index = 0; index < marks.length - 1; index++) {
-    const a = marks[index], b = marks[index + 1], middle = (a + b) / 2;
+  // Pieces and holds in film order. Times are assigned once the pieces too short to show are gone.
+  const sequence = [];
+  for (let index = 0; index < marks.length; index++) {
+    const a = marks[index], b = marks[index + 1];
+    for (const hold of holds) if (hold.t === a) sequence.push({ hold });
+    if (b === undefined) break;
+    const middle = (a + b) / 2;
     const covers = (edit) => edit.from <= middle && middle < edit.to;
     if (edits.some((edit) => edit.kind === "cut" && covers(edit))) continue;
     // A later speed edit wins over an earlier one on the same stretch.
     const rate = edits.findLast((edit) => edit.kind === "speed" && covers(edit))?.rate ?? 1;
-    const last = pieces.at(-1);
-    if (last && last.rate === rate && Math.abs(last.b - a) < 1e-6) last.b = b;
-    else pieces.push({ a, b, rate, at });
-    at += (b - a) / rate;
+    const last = sequence.at(-1);
+    if (last && !last.hold && last.rate === rate && Math.abs(last.b - a) < 1e-6) last.b = b;
+    else sequence.push({ a, b, rate });
   }
-  // Anything shorter than a frame cannot be shown.
-  const kept = pieces.filter((piece) => (piece.b - piece.a) / piece.rate >= 1 / 30);
+  const pieces = [], cards = [];
   let cursor = 0;
-  for (const piece of kept) { piece.at = cursor; cursor += (piece.b - piece.a) / piece.rate; }
+  for (const entry of sequence) {
+    if (entry.hold) {
+      cards.push({ start: cursor, duration: entry.hold.duration, text: entry.hold.text, subtitle: entry.hold.subtitle });
+      cursor += entry.hold.duration;
+      continue;
+    }
+    const length = (entry.b - entry.a) / entry.rate;
+    // Anything shorter than a frame cannot be shown.
+    if (length < 1 / 30) continue;
+    pieces.push({ ...entry, at: cursor });
+    cursor += length;
+  }
   const when = (t) => {
-    for (const piece of kept) {
+    for (const piece of pieces) {
       if (t < piece.a) return piece.at;
       if (t <= piece.b) return piece.at + (t - piece.a) / piece.rate;
     }
-    return cursor;
+    return pieces.length ? pieces.at(-1).at + (pieces.at(-1).b - pieces.at(-1).a) / pieces.at(-1).rate : 0;
   };
-  return { pieces: kept, length: cursor, when };
+  /** Whether take time `t` survives the cuts. */
+  const kept = (t) => pieces.some((piece) => piece.a <= t && t <= piece.b);
+  return { pieces, cards, length: cursor, when, kept };
 }
 
 /** Replace the director's shots inside each camera edit with the framing it asks for. */

@@ -68,23 +68,41 @@
       .caption { position: absolute; inset-inline: 80px; display: flex; justify-content: center; pointer-events: none; z-index: 5; }
       .caption.top { top: 56px; }
       .caption.bottom { bottom: 56px; }
+      /* Marks move with the footage; they sit inside the camera. */
+      #marks { position: absolute; inset: 0; pointer-events: none; }
+      .highlight { position: absolute; box-sizing: border-box; border-radius: 12px; opacity: 0; }
+      .highlight.ring { border: 4px solid #bfe7d2; box-shadow: 0 0 0 2px #07171d66, 0 0 28px #bfe7d28c; }
+      .highlight.spotlight { box-shadow: 0 0 0 4000px #02090d9e; }
+      .ripple { position: absolute; width: 56px; height: 56px; margin: -28px 0 0 -28px; border-radius: 50%; border: 3px solid #bfe7d2; background: #bfe7d233; opacity: 0; }
+      #cursor { position: absolute; left: 0; top: 0; width: 30px; height: 30px; opacity: 0; filter: drop-shadow(0 2px 3px #02090d80); }
+      .keys { position: absolute; right: 80px; display: flex; gap: 10px; opacity: 0; z-index: 5; }
+      .keys.top { top: 56px; }
+      .keys.bottom { bottom: 56px; }
+      .keys kbd { min-width: 34px; padding: 12px 20px; border-radius: 14px; border: 1px solid #294249; border-bottom-width: 4px; background: #07171df2; color: #f4f0e7; font: 600 30px/1.2 system-ui, sans-serif; text-align: center; }
+      .card { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 28px; padding: 0 200px; background: #07171d; color: #f4f0e7; text-align: center; opacity: 0; z-index: 6; }
+      .card h2 { margin: 0; font: 88px/1.15 "Plex Serif", Georgia, serif; font-weight: 400; }
+      .card p { margin: 0; color: #bfe7d2; font: 36px/1.4 system-ui, sans-serif; }
+      #dip { position: absolute; inset: 0; background: #07171d; opacity: 0; z-index: 4; pointer-events: none; }
       .caption span { max-width: 1500px; padding: 18px 36px; border-radius: 40px; background: #07171deb; color: #fff; font: 36px/1.3 system-ui, sans-serif; text-align: center; overflow-wrap: anywhere; }
     </style>
   </head>
   <body>
-    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-duration="__DURATION__">
+    <div id="root" data-composition-id="main" data-start="0" data-width="1920" data-height="1080" data-fps="__FPS__" data-duration="__DURATION__">
       <div id="ground"></div>
       <div id="app">
         <div id="camera">
           __VIDEOS__
+          <div id="marks">__MARKS__</div>
+          <svg id="cursor" viewBox="0 0 30 30" aria-hidden="true"><path d="M3 2v22l6-5.6 4.2 9.2 3.9-1.8-4.1-9h8.5z" fill="#fff" stroke="#07171d" stroke-width="1.8" stroke-linejoin="round" /></svg>
         </div>
       </div>
       <section id="logo" class="clip" data-start="0" data-duration="__LOGO__" data-track-index="1">
         <img id="logo-mark" src="assets/icon.png" alt="" />
       </section>
       <div id="curtain"></div>
+      <div id="dip"></div>
       __AUDIO__
-      __CAPTIONS__
+      <div id="overlays">__OVERLAYS__</div>
     </div>
     <script>
       window.__buildTimeline = (film) => {
@@ -121,6 +139,42 @@
         tl.fromTo(`#caption-${i}`, { opacity: 0, y: caption.position === "top" ? -8 : 8 }, { opacity: 1, y: 0, duration: fade, ease: "power2.out", immediateRender: false }, caption.start);
         tl.to(`#caption-${i}`, { opacity: 0, duration: fade }, caption.start + caption.duration - fade);
       }
+
+      // --- Marks on the footage and on the screen.
+      const appear = (target, start, duration, from = {}, to = {}) => {
+        const fade = Math.min(0.25, duration / 4);
+        tl.fromTo(target, { opacity: 0, ...from }, { opacity: 1, ...to, duration: fade, ease: "power2.out", immediateRender: false }, start);
+        tl.to(target, { opacity: 0, duration: fade, ease: "power1.in" }, start + duration - fade);
+      };
+      film.highlights.forEach((mark, i) => appear(`#highlight-${i}`, mark.start, mark.duration, { scale: 1.06 }, { scale: 1 }));
+      film.keys.forEach((entry, i) => appear(`#keys-${i}`, entry.start, entry.duration, { y: entry.position === "top" ? -8 : 8 }, { y: 0 }));
+      film.cards.forEach((card, i) => {
+        appear(`#card-${i}`, card.start, card.duration);
+        tl.fromTo(`#card-${i} h2`, { y: 24 }, { y: 0, duration: 0.6, ease: "power3.out", immediateRender: false }, card.start);
+      });
+      for (const dip of film.transitions) {
+        const half = dip.duration / 2;
+        tl.fromTo("#dip", { opacity: 0 }, { opacity: 1, duration: half, ease: "power1.in", immediateRender: false }, Math.max(0, dip.t - half));
+        tl.to("#dip", { opacity: 0, duration: half, ease: "power1.out" }, dip.t);
+      }
+
+      // --- The pointer. Its tip is the top-left of the drawing.
+      const at = ({ x, y }) => ({ x: x * W - 3, y: y * H - 2 });
+      let rest = film.cursor.moves[0] ? at(film.cursor.moves[0]) : { x: 0, y: 0 };
+      gsap.set("#cursor", { ...rest, opacity: 0, scale: 1, transformOrigin: "3px 2px" });
+      for (const move of film.cursor.moves) {
+        const to = at(move);
+        tl.fromTo("#cursor", { ...rest }, { ...to, duration: move.duration, ease: move.ease, immediateRender: false }, move.t);
+        rest = to;
+      }
+      for (const span of film.cursor.visible) {
+        tl.fromTo("#cursor", { opacity: 0 }, { opacity: 1, duration: 0.18, immediateRender: false }, span.start);
+        tl.to("#cursor", { opacity: 0, duration: 0.3 }, Math.min(film.duration, span.end) - 0.3);
+      }
+      film.cursor.clicks.forEach((click, i) => {
+        tl.fromTo("#cursor", { scale: 1 }, { scale: 0.82, duration: 0.07, yoyo: true, repeat: 1, immediateRender: false }, click.t - 0.07);
+        tl.fromTo(`#ripple-${i}`, { opacity: 0.9, scale: 0.3 }, { opacity: 0, scale: 1.5, duration: 0.5, ease: "power2.out", immediateRender: false }, click.t);
+      });
       window.__timelines ??= {};
       window.__timelines["main"] = tl;
       };

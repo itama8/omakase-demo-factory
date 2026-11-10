@@ -57,3 +57,40 @@ test("review saves persist, reject stale edits, roll back failed builds, and con
     assert.equal((await post("api/edit", { revision: state.revision, edits: [] })).status, 200);
   } finally { await service.close(); await rm(root, { recursive: true, force: true }); }
 });
+
+test("review switches takes only when the saved edits still fit, and exports the chosen preset", async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "demo-review-takes-"));
+  const out = path.join(root, "out/demo"), dir = path.join(root, "screenplays/demo");
+  await mkdir(dir, { recursive: true }); await mkdir(path.join(root, "review"));
+  const beats = (ids) => [{ type: "start", t: 0 }, ...ids.flatMap((id, i) => [{ type: "span-start", id, t: i * 2 }, { type: "span-end", id, t: i * 2 + 2 }]), { type: "end", t: ids.length * 2 }];
+  for (const [id, ids] of [["100-a", ["hello"]], ["200-b", ["hello", "more"]], ["300-c", ["other"]]]) {
+    await mkdir(path.join(out, "takes", id), { recursive: true });
+    await writeFile(path.join(out, "takes", id, "take.json"), JSON.stringify({ fps: 60, duration: ids.length * 2, beats: beats(ids) }));
+  }
+  const { useTake } = await import("../src/takes.mjs");
+  await useTake(out, "100-a");
+  await writeFile(path.join(dir, "edit.yaml"), "edits:\n  - speed: 2\n    over: hello\n");
+  const built = [];
+  const service = await serveReview({ root, name: "demo", build: async () => { built.push(Date.now()); }, renderCommand: [process.execPath, "-e", "console.log(process.argv.slice(1).join(' '))"] });
+  const post = (pathname, data) => fetch(new URL(pathname, service.url), { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+  try {
+    const state = await (await fetch(new URL("api/state", service.url))).json();
+    assert.deepEqual(state.takes.map((take) => [take.id, take.current]), [["300-c", false], ["200-b", false], ["100-a", true]]);
+    assert.ok(state.presets.vertical);
+    const misfit = await post("api/take", { revision: state.revision, id: "300-c" });
+    assert.equal(misfit.status, 409);
+    assert.match((await misfit.json()).error, /does not fit the saved edits/);
+    assert.equal(JSON.parse(await readFile(path.join(out, "take.json"), "utf8")).video, "takes/100-a/take.mp4");
+    const switched = await post("api/take", { revision: state.revision, id: "200-b" });
+    assert.equal(switched.status, 200);
+    const next = await switched.json();
+    assert.equal(next.film.duration, 2.6 + 1 + 2);
+    assert.equal(next.takes.find((take) => take.current).id, "200-b");
+    assert.equal((await post("api/take", { revision: state.revision, id: "100-a" })).status, 409);
+    assert.equal((await post("api/render", { revision: next.revision, preset: "tiktok" })).status, 400);
+    assert.equal((await post("api/render", { revision: next.revision, preset: "gif" })).status, 202);
+    let latest;
+    for (let i = 0; i < 50; i++) { latest = await (await fetch(new URL("api/state", service.url))).json(); if (latest.job.state !== "running") break; await new Promise((resolve) => setTimeout(resolve, 20)); }
+    assert.equal(latest.job.preset, "gif");
+  } finally { await service.close(); await rm(root, { recursive: true, force: true }); }
+});

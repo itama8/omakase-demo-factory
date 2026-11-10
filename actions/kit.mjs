@@ -25,11 +25,12 @@ async function withFile(stage, file, run) {
 export const kitActions = {
   focus: {
     summary: "Caption a moment and frame a visible element, or pull back with wide. Caption persists until the next focus; use an empty caption to clear it.",
-    args: { value: text, on: { type: "text", default: "wide", doc: "CSS selector or wide" }, position: { type: "enum", values: ["top", "bottom"], default: "bottom" }, zoom: { type: "number", default: 2.1 } },
-    async run(stage, { value: caption, on, position, zoom }) {
+    args: { value: text, on: { type: "text", default: "wide", doc: "CSS selector or wide" }, position: { type: "enum", values: ["top", "bottom"], default: "bottom" }, zoom: { type: "number", default: 2.1 }, mark: { type: "enum", values: ["none", "ring", "spotlight"], default: "none", doc: "draw a ring around the element, or dim everything else" } },
+    async run(stage, { value: caption, on, position, zoom, mark }) {
+      if (mark !== "none" && on === "wide") throw new Error("focus.mark needs an element in \"on\"");
       if (zoom < 1 || zoom > 4) throw new Error("focus.zoom must be between 1 and 4");
       if (on !== "wide") await stage.until(`camera target ${on} is visible`, visible(on));
-      stage.beat("focus", { caption, position, zoom, box: on === "wide" ? null : await stage.box(on) });
+      stage.beat("focus", { caption, position, zoom, mark, box: on === "wide" ? null : await stage.box(on) });
     }
   },
   click: {
@@ -38,7 +39,7 @@ export const kitActions = {
     async run(stage, { value, shows, reads }) {
       await stage.until(`click target ${value}`, visible(value));
       await stage.show("modal", value);
-      await stage.app.click(value);
+      await stage.click(value);
       if (shows) await stage.until(`click shows ${shows}`, visible(shows));
       if (reads) await stage.app.until(`note contains ${reads}`, async () => (await doc(stage)).includes(reads));
     }
@@ -56,7 +57,7 @@ export const kitActions = {
   rename: {
     summary: "Rename the current note.", args: { value: text },
     async run(stage, { value }) {
-      await stage.app.click("#noteNameBtn");
+      await stage.click("#noteNameBtn");
       await stage.until("rename input", visible("#noteNameInput"));
       await stage.app.evaluate("document.getElementById('noteNameInput').select(), true");
       await stage.type(value, { where: () => stage.box("#noteNameInput") });
@@ -69,7 +70,7 @@ export const kitActions = {
     summary: "Set the current note's project tag.", args: { value: text },
     async run(stage, { value }) {
       value = value.replace(/^#/, "");
-      await stage.app.click("#hudNoteTag");
+      await stage.click("#hudNoteTag");
       await stage.until("tag input", visible("#hudNoteTagInput"));
       await stage.app.evaluate("document.getElementById('hudNoteTagInput').select(), true");
       await stage.type(value, { where: () => stage.box("#hudNoteTagInput") });
@@ -116,7 +117,7 @@ export const kitActions = {
     args: { value: text, reads: { type: "text" } },
     async run(stage, { value, reads }) {
       await stage.app.evaluate(`(() => { document.querySelectorAll('[data-demo-target]').forEach(e => delete e.dataset.demoTarget); const e = ${lastCard}?.querySelector('[data-invocation-action=' + ${q(value)} + ']'); if (!e) throw new Error('card action not found'); e.dataset.demoTarget = 'action'; e.scrollIntoView({ block: 'center' }); return true; })()`);
-      await stage.app.click('[data-demo-target="action"]');
+      await stage.click('[data-demo-target="action"]');
       if (reads) await stage.app.until("card edit merged", async () => (await doc(stage)).includes(reads));
     }
   },
@@ -128,7 +129,7 @@ export const kitActions = {
         await stage.action("launcher", { value: "Insert Chart", wpm: 48 });
         await stage.until("chart picker", visible("#chartInsertCsvBtn"));
         await stage.show("modal", "#chartInsertOverlay");
-        await stage.app.click("#chartInsertCsvBtn");
+        await stage.click("#chartInsertCsvBtn");
         await stage.app.until("CSV chart inserted", async () => (await doc(stage)).split("```chart").length > before.split("```chart").length);
       });
     }
@@ -151,7 +152,7 @@ export const kitActions = {
       await stage.until("PDF selection toolbar", visible(button));
       await stage.show("modal", button);
       await stage.pause(1200);
-      await stage.app.click(button);
+      await stage.click(button);
     }
   },
   browser: {
@@ -164,7 +165,7 @@ export const kitActions = {
       if (!want) return;
       const url = new URL(value.includes("://") ? value : `https://${value}`);
       if (!["http:", "https:"].includes(url.protocol)) throw new Error("browser expects an HTTP(S) URL");
-      await stage.app.click("#browserAddressInput");
+      await stage.click("#browserAddressInput");
       await stage.until("browser address focused", "document.activeElement === document.getElementById('browserAddressInput')");
       await stage.chord("Ctrl+A", { watch: null });
       await stage.type(url.href, { where: () => stage.box("#browserAddressInput") });

@@ -24,7 +24,8 @@ After the script is agreed, write `screenplay.yaml` behind the scenes. Do not ma
 - Put fictional demo notes/CSV/PDF fixtures beside the screenplay. Vault paths are relative to Omakase; `../../omakase-demo-factory/screenplays/<name>/vault` points back here. File actions resolve paths relative to the screenplay folder.
 - Use scripted Sushi replies for repeatable demos (`sushi: replies.mjs`; see existing loading demos). `sushi: live` explicitly uses the profile in `OMAKASE_PROFILE`; state that model output varies. Never silently substitute a scripted response for a requested live model.
 - `dictation: fixture` demonstrates the real dictation UI with a fixture transcript. This is not microphone recording. Live microphone capture is not built into this Linux pipeline.
-- `focus` supplies a caption and optional CSS camera target. Use `focus: ""` to clear a caption. Automatic camera movement still follows later actions; use an edit camera override to hold a framing over a span.
+- `focus` supplies a caption and optional CSS camera target; `mark: ring` or `mark: spotlight` highlights the target. Use `focus: ""` to clear a caption.
+- Clicks in custom steps go through `stage.click(selector)` so the film draws the pointer. Set `sfx: true` for key and click sounds. If the story needs close-ups past about 1.3x zoom, set `capture: { scale: 3 }`; `cut` warns when the take is not sharp enough. Automatic camera movement still follows later actions; use an edit camera override to hold a framing over a span.
 - Each action must wait for its outcome. Pauses are rhythm, not synchronization. A check failure means fix the action, selector, or fixture and retry the focused demo. Do not hide failed assertions.
 - Never edit or rebuild the sibling Omakase checkout from this repository. If the build is stale, explain the prerequisite. Work on the already-built app here.
 
@@ -36,9 +37,10 @@ The preview lets the user play/scrub, choose scenes or steps, trim, remove a mom
 
 Manual controls and the agent share `screenplays/<name>/edit.yaml`. Read its latest contents before editing. Preserve the user's manual edits unless their request changes them. Edits name stable spans (`scene/step` or ranges), so a retake can reuse them. If a script change removes a span referenced by an edit, resolve that reference before recording/cutting.
 
-- Caption, framing, speed, trim, or cut request: edit `edit.yaml`, run `node bin/demo.mjs cut <name>`, and ask the user to Reload edit in the existing preview. No retake or MP4 render needed.
-- Performance/content request: update the story and script, check, and record again. Successful takes are kept under `out/<name>/takes/`; a failed retake leaves the previous take in place.
+- Caption, framing, speed, trim, cut, title/end card, highlight, key callout, or transition request: edit `edit.yaml`, run `node bin/demo.mjs cut <name>`, and ask the user to reload the existing preview. No new recording or render needed.
+- Performance/content request confined to one scene: update the story and script, check, then `node bin/demo.mjs retake <name> <scene>`. Joins get a short automatic dip. If the change alters the app state later scenes start from, record a whole take instead.
+- Other performance/content requests: update the story and script, check, and record again. Takes are kept under `out/<name>/takes/`; `takes <name> <id>` or the preview's Take menu goes back to one. A failed recording leaves the take in use in place.
 - To resume an existing take: `node bin/demo.mjs preview <name>`.
-- For final delivery: use Export MP4 in the preview, or `node bin/demo.mjs render <name>`. Render only after the edit is ready, unless asked for an early MP4. Report the file and actual validation boundaries. Do not label a preview as an exported video.
+- For final delivery: use Export in the preview, or `node bin/demo.mjs render <name> [--preset 720p|square|vertical|webm|gif|poster]`. Render only after the edit is ready, unless asked for an early MP4. Report the file and actual validation boundaries. Do not label a preview as an exported video.
 
 When handing back, lead with the preview or video, explain any meaningful limitation, and keep implementation details out of the creative conversation.

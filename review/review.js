@@ -54,6 +54,7 @@ function buttons() {
   $("discard").disabled = !dirty || saving;
   $("undo").disabled = !undo.length || busy || dirty;
   $("export").disabled = dirty || busy || stale;
+  $("take").disabled = dirty || busy || stale;
   $("export").title = dirty ? "Save or discard the preview changes first" : "";
   cameraGrid.refresh();
 }
@@ -302,18 +303,20 @@ function display(data, reloadFilm = false) {
   data.edits.forEach((edit, index) => {
     const item = document.createElement("li"),
       remove = document.createElement("button");
-    const kind = ["cut", "speed", "camera", "caption"].find((k) => k in edit);
-    const detail =
-      kind === "camera"
-        ? "Framing"
-        : kind === "speed"
-          ? `${edit.speed}× speed`
-          : kind === "cut"
-            ? "Removed"
-            : edit.caption || "No caption";
+    const describe = {
+      camera: () => "Framing",
+      speed: () => `${edit.speed}× speed`,
+      cut: () => "Removed",
+      caption: () => edit.caption || "No caption",
+      card: () => `Card “${edit.card}”`,
+      highlight: () => (edit.style === "spotlight" ? "Spotlight" : "Highlight"),
+      keys: () => `Keys ${edit.keys}`,
+      transition: () => "Dip transition",
+    };
+    const kind = Object.keys(describe).find((k) => k in edit);
     item.append(
       document.createTextNode(
-        `${detail} · ${label(String(edit.over ?? edit.cut).split("@")[0])}`,
+        `${describe[kind]()} · ${label(String(edit.over ?? edit.cut ?? edit.at).split("@")[0])}`,
       ),
     );
     remove.textContent = "Remove";
@@ -322,6 +325,30 @@ function display(data, reloadFilm = false) {
     item.append(remove);
     $("edits").append(item);
   });
+  const when = (take) =>
+    new Date(take.at).toLocaleString([], {
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  $("take").replaceChildren(
+    ...data.takes.map((take) => {
+      const option = new Option(
+        `${when(take)} · ${take.duration.toFixed(0)}s${take.scene ? ` · retook ${take.scene}` : ""}`,
+        take.id,
+      );
+      option.selected = take.current;
+      return option;
+    }),
+  );
+  $("take").closest("label").hidden = data.takes.length < 2;
+  if (!$("preset").options.length)
+    for (const [id, summary] of Object.entries(data.presets)) {
+      const option = new Option(id, id);
+      option.title = summary;
+      $("preset").append(option);
+    }
   if (reloadFilm) {
     ready = false;
     pendingPlan = null;
@@ -338,7 +365,7 @@ function job(value) {
   if (state) state.job = value;
   $("download").hidden = !(value?.state === "ready" && value.current && !dirty);
   $("log").textContent = value?.log || "No export running.";
-  if (value?.state === "running") status("Exporting MP4…");
+  if (value?.state === "running") status(`Exporting ${value.preset ?? ""}…`);
   else if (value?.state === "failed")
     status("Export failed. See Export progress.", true);
   buttons();
@@ -551,8 +578,32 @@ $("reload").onclick = async () => {
 };
 $("export").onclick = async () => {
   try {
-    job(await post("/api/render", { revision: state.revision }));
+    job(
+      await post("/api/render", {
+        revision: state.revision,
+        preset: $("preset").value,
+      }),
+    );
   } catch (error) {
+    editStatus(error.message, true);
+  }
+};
+$("take").onchange = async () => {
+  try {
+    stop();
+    editStatus("Switching take…");
+    const data = await post("/api/take", {
+      revision: state.revision,
+      id: $("take").value,
+    });
+    generation++;
+    undo.length = 0;
+    // The other take is a different recording, so playback loads it afresh.
+    time = 0;
+    display(data, true);
+    editStatus("Switched take");
+  } catch (error) {
+    $("take").value = state.takes.find((take) => take.current)?.id ?? "";
     editStatus(error.message, true);
   }
 };

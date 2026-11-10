@@ -233,7 +233,7 @@ export const actions = {
     async run(stage, { value, row, column, lift, wpm, answer }) {
       const cell = `.cm-table-inline [data-cell-row="${row}"][data-table-col-index="${column}"]`;
       await stage.until("the table is drawn", `!!document.querySelector(${quote(cell)})`);
-      await stage.app.click(cell);
+      await stage.click(cell);
       await stage.pause(450);
       // Clicking scrolls the caret into view, so the table is lifted afterwards.
       if (lift !== undefined) {

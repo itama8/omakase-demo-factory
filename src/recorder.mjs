@@ -3,7 +3,7 @@
 // box. The director reads the log to place the camera, so a screenplay never
 // has to describe where things are. Nothing here knows what Omakase's UI
 // looks like; that knowledge lives in the action vocabulary.
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -110,6 +110,15 @@ async function seedVault(source, vault) {
   await writeFile(path.join(vault, ".omakase", "state", "note-order.json"), JSON.stringify(created, null, 2));
 }
 
+/** Frames the capture actually wrote each second, or null when ffprobe cannot say. */
+export function capturedRate(file) {
+  const probe = spawnSync("ffprobe", ["-v", "error", "-select_streams", "v:0", "-count_packets", "-show_entries", "stream=nb_read_packets:format=duration", "-of", "json", file], { encoding: "utf8" });
+  try {
+    const info = JSON.parse(probe.stdout);
+    return Number(info.streams[0].nb_read_packets) / Number(info.format.duration);
+  } catch { return null; }
+}
+
 /**
  * Record one take of `scenario` and write `take.mp4` and `take.json` to `outDir`.
  *
@@ -119,8 +128,13 @@ async function seedVault(source, vault) {
  *
  * `pace` scales every human delay. At 0 the scenario runs as fast as the app
  * answers, which turns it into a check: only its waits and assertions remain.
+ *
+ * `only` names one scene to record. The scenes before it run at check speed
+ * with the camera off, so the app is in the state that scene starts from.
  */
-export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, height = 720, scale = 2, fps = 30, seed = 7, record = true, pace = 1 }) {
+export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, height = 720, scale = 2, fps = 60, seed = 7, record = true, pace: wanted = 1, only = null }) {
+  // The lead-in to a single scene runs at check speed; the pace returns when the camera rolls.
+  let pace = only ? 0 : wanted;
   // The app session resolves dist/ and electron from the working directory.
   process.chdir(omakaseRoot);
   const { launchApp, electronExpression, editorReady } = await import(pathToFileURL(path.join(omakaseRoot, "scripts/app-session.mjs")).href);
@@ -140,7 +154,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
   const rest = (ms) => pace > 0 ? delay(ms * pace) : undefined;
 
   const random = mulberry32(seed);
-  const beats = [];
+  let beats = [];
   let app, recording, sushi, clock = null;
   let profilePath;
   try {
@@ -184,7 +198,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     let held = 0;
     const send = (type, key, extra = {}) => app.send("Input.dispatchKeyEvent", { type, key: key.key, code: key.code, windowsVirtualKeyCode: key.vk, modifiers: held, ...extra });
     const stage = {
-      app, width, height, random, pace, profile: profilePath, dir: scenario.dir, electron: electronExpression,
+      app, width, height, random, get pace() { return pace; }, profile: profilePath, dir: scenario.dir, electron: electronExpression,
       action: (name, args) => scenario.action(name, stage, args),
       /** Seconds since the first recorded frame. */
       now: () => clock === null ? 0 : (Date.now() - clock) / 1000,
@@ -233,6 +247,8 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
           return;
         }
         const key = keyFor(char);
+        // One beat per key, for the sound of the keyboard. A check has no sound.
+        if (pace > 0 && clock !== null) stage.beat("key");
         // With Shift held, a letter key reports its capital. Shortcuts match on it.
         if (held & 8 && /^[a-z]$/.test(key.key)) key.key = key.key.toUpperCase();
         if (key.shift && !(held & 8)) { await stage.down("Shift"); await rest(30); }
@@ -261,6 +277,19 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
         }
         stage.beat("type-end", { box: await where() });
       },
+      /**
+       * Click `selector` the way a hand does: head for it, arrive, then press.
+       * The recording has no pointer, so the two beats are what the film draws
+       * one from. Use this instead of `app.click` for any click the viewer should see.
+       */
+      async click(selector, options) {
+        const frac = (at) => ({ x: Number((at.x / width).toFixed(4)), y: Number((at.y / height).toFixed(4)) });
+        // The app's own hit test scrolls the target into view and says where the click will land.
+        if (pace > 0) { stage.beat("pointer", frac(await app.hitPoint(selector))); await rest(520); }
+        const point = await app.click(selector, options);
+        if (pace > 0 && point) stage.beat("click", frac(point));
+        await rest(180);
+      },
       /** A key combination such as "Ctrl+Shift+F", pressed the way a hand does: modifiers first. The camera goes to `watch`; pass null to leave it where it is. */
       async chord(combo, { label = combo, watch = "body > .keystroke-hud-card[popover]" } = {}) {
         const parts = combo.split("+");
@@ -277,6 +306,13 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     };
 
     await scenario.prepare?.(stage);
+    if (only) {
+      await scenario.perform(stage, { before: only });
+      // Let the app finish painting what the lead-in did before the camera rolls.
+      await delay(900);
+      beats = [];
+      pace = wanted;
+    }
     if (record) {
       recording = await startRecording({ display: screen.display, ...pixels, fps, file: path.join(outDir, "take.mp4") });
       clock = recording.startMs;
@@ -284,7 +320,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
       clock = Date.now();
     }
     stage.beat("start");
-    await scenario.perform(stage);
+    await scenario.perform(stage, only ? { only } : {});
     stage.beat("end");
     await rest(400);
   } catch (error) {
@@ -298,7 +334,13 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     screen.stop();
     lock.release();
   }
-  const take = { name: scenario.name, fps, window: { width, height, scale }, duration: beats.at(-1)?.t ?? 0, beats };
+  const take = { name: scenario.name, fps, window: { width, height, scale }, ...(only ? { only } : {}), duration: beats.at(-1)?.t ?? 0, beats };
+  if (record) {
+    // A capture that cannot keep up drops frames silently. Say so, because it shows as stutter.
+    const rate = capturedRate(path.join(outDir, "take.mp4"));
+    if (rate !== null) take.captured = Number(rate.toFixed(1));
+    if (rate !== null && rate < fps * 0.92) console.warn(`Warning: the capture averaged ${rate.toFixed(1)} of ${fps} frames a second. Lower capture.fps or capture.scale in the screenplay if the take stutters.`);
+  }
   // Only a recorded take is kept. A rehearsal or a check must not replace it.
   if (record) await writeFile(path.join(outDir, "take.json"), JSON.stringify(take, null, 1));
   return take;

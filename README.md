@@ -1,15 +1,14 @@
 # Omakase demo factory
 
-Describe a feature or rough idea to your agent. Work out the story in conversation, then let the agent record the real Omakase app and give you an editable browser preview. Revise it in conversation or use the preview's controls. Export an MP4 when the cut is ready.
+Describe a feature or rough idea to your agent. Work out the story in conversation, then let the agent record the real Omakase app and give you an editable browser preview. Revise it in conversation or with the preview's controls. Export when the cut is ready.
 
 The agent workflow is in [the demo skill](.agents/skills/omakase-demo/SKILL.md), discoverable through `.agents/skills/` (Codex) and `.claude/skills/` (Claude). An agent starting here also reads `AGENTS.md`. For example:
 
 > Make a short demo of turning a table into a chart. Start with a cache study, ask Sushi for a chart, merge it, and show that Undo reverses the entire change.
 
-You do not need to prepare a screenplay file. The agent maintains a plain-language `story.md`, an executable `screenplay.yaml`, and persistent `edit.yaml` behind the scenes. Any capable coding agent can do this directly; the optional `draft` command still uses Claude Code for file-based narration.
+You do not need to prepare a screenplay file. The agent maintains a plain-language `story.md`, an executable `screenplay.yaml`, and a persistent `edit.yaml` behind the scenes.
 
 ```bash
-cd /home/a2ajinkya/Projects/omakase-demo-factory
 npm install
 node bin/demo.mjs doctor
 node bin/demo.mjs init cache-chart "Turn a cache study into a chart, then undo the merge"
@@ -17,81 +16,89 @@ node bin/demo.mjs init cache-chart "Turn a cache study into a chart, then undo t
 node bin/demo.mjs produce cache-chart  # check → record → cut → editable preview URL
 ```
 
-The preview is local to this machine. Keep its process running. No full video render is needed to review or revise the cut.
+The preview is local to this machine. Keep its process running.
+
+## What a film has
+
+- **The real app, at 60 fps.** Each take records the built app on a private display. Nothing is recreated.
+- **An automatic camera** that follows the caret, the keys, and the panels that open.
+- **A drawn pointer.** The recording has no cursor, so the film draws one. It glides to each click the performance made, presses, and leaves a ripple.
+- **Overlays from `edit.yaml`:** captions, title and end cards, ring and spotlight highlights, key callouts, and dip transitions.
+- **Sound:** optional music, loudness-normalised, and optional synthesised key and click sounds (`sfx: true`).
+- **Exports** at 1080p, 720p, square, vertical, WebM, GIF, and a poster frame.
 
 ## Review and revise
 
-`node bin/demo.mjs preview <name>` resumes an existing take in the factory's browser editor and prints its URL. Use `--port 4317` for a stable port; otherwise the OS picks a free port. The editor provides:
+`node bin/demo.mjs preview <name>` resumes an existing take in the browser editor and prints its URL. Use `--port 4317` for a stable port.
 
-- Use the timeline inside the playback window: scenes on the top row, steps below. Click a block to jump, drag the playhead to scrub, or use the player's play button. Small markers open menus for brief or instantaneous steps. Both rows follow cuts and speed changes, including unsaved previews. Editing preserves the current recorded frame, and the caption field follows the visible caption until you edit it.
-- Change the kept start/end time within that moment, remove it, or change its speed.
-- Type a caption or change the zoom to see an instant, unsaved preview. Place the zoom by dragging the window on the grid, or clicking a new location. The window shows the visible crop and stays within the frame; arrow keys move it and Home centres it. No enabling checkboxes.
-- Save changes to persist them, Discard to restore the saved cut, or Undo the last save in this browser session.
-- Export an MP4 with progress/error output and download it when ready.
+- The timeline sits inside the playback window: scenes on the top row, steps below. Click a block to jump, or drag the playhead to scrub.
+- For the selected moment you can change the kept start and end, remove it, change its speed, set a caption, or place the camera. Drag the window on the grid to place it; arrow keys move it and Home centres it.
+- Changes preview instantly. Save writes them; Discard restores the saved cut; Undo reverts the last save in this browser session.
+- **Take** switches to any kept recording. A take whose spans no longer match the saved edits is refused, with the reason.
+- **Format** and **Export** render in the background and offer a download when ready.
 
-Save changes writes to `screenplays/<name>/edit.yaml`, the same file the agent edits. Previewing does not write that file. Existing settings load into the controls; editing them replaces their previous values. Saved edits are in a collapsed section. Every browser save preserves the previous file under `out/<name>/edit-history/`. Agent changes are picked up automatically when there is no unsaved preview; otherwise Reload resolves the conflict. Export uses saved changes; save or discard pending controls first.
+Save writes `screenplays/<name>/edit.yaml`, the same file the agent edits. Every browser save keeps the previous file under `out/<name>/edit-history/`. Agent changes are picked up automatically when there is no unsaved preview; otherwise Reload resolves the conflict. The preview and the export share one film plan, so the overlays match. Preview playback uses browser decoding, so check the final file for frame-accurate delivery.
 
-For conversational revisions, the agent edits `edit.yaml` and runs `cut`. Reload the preview to see them. Only performance or content changes require a retake. Successful recordings are kept under `out/<name>/takes/`; failures leave the previous take usable. The cut and the export share the same film plan and GSAP composition. Preview playback uses browser media decoding, so final MP4 review remains the check for frame-accurate delivery.
+For conversational revisions the agent edits `edit.yaml` and runs `cut`. Only performance or content changes need a new recording, and often only of one scene (see Retakes).
 
-`studio <name>` retains the separate HyperFrames Studio for deeper composition work.
+`studio <name>` opens the separate HyperFrames Studio for deeper composition work.
 
-## Pipeline commands
+## Commands
 
 ```bash
-node bin/demo.mjs draft "Navigating with find"   # plain-English narration -> screenplay
+node bin/demo.mjs doctor                         # prerequisites, and whether the screenplays were checked against this app build
 node bin/demo.mjs actions                        # what a screenplay can ask the app to do
+node bin/demo.mjs validate                       # YAML only, no app
 node bin/demo.mjs check                          # every screenplay at full speed, no recording
-node bin/demo.mjs rehearse navigating-with-find  # demo pace, no recording, a screenshot per jump
-node bin/demo.mjs produce navigating-with-find   # check, record, cut, editable local preview
-node bin/demo.mjs make navigating-with-find      # record, cut, render -> out/<name>/<name>.mp4
+node bin/demo.mjs rehearse <name>                # demo pace, no recording, a screenshot per jump
+node bin/demo.mjs produce <name>                 # check, record, cut, editable local preview
+node bin/demo.mjs record <name>                  # a whole take
+node bin/demo.mjs retake <name> <scene>          # one scene again, spliced into the take in use
+node bin/demo.mjs takes <name> [id]              # list kept takes, or switch to one
+node bin/demo.mjs spans <name>                   # the take's spans and times, for writing edits
+node bin/demo.mjs cut <name>                     # apply edit.yaml -> out/<name>/project/
+node bin/demo.mjs render <name> [--preset p]     # -> out/<name>/<name>.mp4, or <name>-<preset>.<ext>
+node bin/demo.mjs make <name>                    # record, cut, render
+node bin/demo.mjs draft [note]                   # optional: narration file -> screenplay, using Claude Code
+node bin/demo.mjs context                        # vocabulary and paths as JSON, for agents
 ```
 
-`make` is `record`, then `cut`, then `render`. After changing `edit.yaml` or the template, run `cut` and reload the preview; render again only when needed. `validate` checks YAML without opening the app. `context` prints the vocabulary and local paths as JSON for agents.
+The app comes from `../omakase-v2` (override with `OMAKASE_ROOT`) and must already be built. The factory never rebuilds it. It holds Omakase's check lock while it performs, so a check elsewhere cannot rebuild the app mid-take. Each run uses a throwaway profile seeded from the screenplay's vault. Linux only: it needs `Xvfb` and `ffmpeg`. Rendering uses a pinned HyperFrames (`hyperframes@0.9.30`) through `npx`.
 
-The app comes from `../omakase-v2` (override with `OMAKASE_ROOT`) and must already be built. The factory never rebuilds it, and it holds Omakase's check lock while it performs, so a check elsewhere cannot rebuild the app mid-take. Each run uses a throwaway profile seeded from the screenplay's vault. Linux only: it needs `Xvfb` and `ffmpeg`.
+After the app is rebuilt, run `check`. A full pass is recorded in `out/checked.json`, and `doctor` reports `STALE` until the screenplays pass against the new build.
 
-## Starting from narration
+### Retakes
 
-Write the demo in plain English, in a Markdown file with any name you like.
+`retake <name> <scene>` records one scene and splices it into the take in use. The scenes before it run first at check speed with the camera off, so the app starts the scene in the right state. Later scenes keep their earlier footage and move by however much longer or shorter the scene became. The film puts a 0.3 s dip over each join, because a live app never lands in exactly the same state twice. If the new scene leaves the app in a different state, for example different note content, record a whole take instead.
 
-```md
-Cut to a blank note. Music starts, Mozart's Marriage of Figaro.
+Every take is kept under `out/<name>/takes/`, and a failed recording leaves the take in use untouched. `takes <name>` lists them; `takes <name> <id>` switches back.
 
-Type, camera on the caret: ...
+### Export presets
 
-Search the whole vault for tiramisu. Arrow down once through the matches and jump into the recipe.
-```
+`render <name> --preset <p>`, or the Format menu in the preview:
 
-Narrations are picked up from two places:
+| Preset | Output |
+| --- | --- |
+| `1080p` | 1920x1080 MP4, the master (default) |
+| `720p` | 1280x720 MP4 |
+| `square` | 1080x1080 MP4, the film letterboxed across the middle |
+| `vertical` | 1080x1920 MP4, the film letterboxed across the middle |
+| `webm` | 1920x1080 VP9 |
+| `gif` | 960 wide, 15 fps, silent |
+| `poster` | One PNG frame; `--at <seconds>` picks it, otherwise two fifths in |
 
-- **Anywhere under `screenplays/`.** Every Markdown file there is a narration. A loose file such as `screenplays/quick tiramisu lookup.md` becomes the demo `quick-tiramisu-lookup`. A file inside a folder, such as `screenplays/moats/first idea.md`, belongs to the demo `moats`. Keep one narration per demo folder.
-- **Your Omakase vault**, for notes whose first line is `# Screenplay: <title>`. The title names the demo.
-
-A first line of `# Screenplay: <title>` is optional under `screenplays/`; when present, it titles the demo and names a loose file's demo.
-
-```bash
-node bin/demo.mjs draft                    # every narration: new, changed, current, or hand-written
-node bin/demo.mjs draft --all              # draft the new and changed ones
-node bin/demo.mjs draft "first idea"       # one, by demo name, title, file name, or path
-```
-
-`draft` hands the narration to Claude with the action vocabulary and the demo vault's notes, and writes `screenplays/<name>/screenplay.yaml`. It then validates the draft and performs it at full speed, and sends any failure back for a repair, up to three attempts. A draft it keeps is one that already works in the app.
-
-- It needs the `claude` command (Claude Code) on the PATH. The narration and the demo vault's note names and headings are sent to Claude; your own vault is only read to find narrations.
-- The narration stays where you put it and is never copied or renamed. The screenplay's second line records its path and a digest of its text, which is how `draft` knows a narration has changed. Renaming or moving a narration is fine; the next draft records the new path.
-- Anything the narration asks for that no action can do is listed after the draft and left out, not improvised.
-- The narration is the source. To change the demo, change the narration and draft again: unchanged parts keep their scene names, so edits keep pointing at them. If `edit.yaml` names a span the new draft no longer has, `draft` says so.
-- A screenplay written by hand is not overwritten without `--force`. Delete the first comment line of a drafted screenplay to take it over by hand.
-- Vaults searched: `~/.config/Electron/vault` and `~/.config/omakase/vault`, or the folders in `OMAKASE_NOTES`, separated by colons.
+The master renders once; other presets are made from it with ffmpeg and render it again only when the cut is newer.
 
 ## Writing a screenplay
 
-A demo is a folder in `screenplays/` with a `screenplay.yaml`, an optional `edit.yaml`, and usually the narration it was drafted from. You can also write the YAML directly.
+A demo is a folder in `screenplays/` with a `screenplay.yaml`, an optional `edit.yaml`, and usually a `story.md`.
 
 ```yaml
 title: Navigating with find
 vault: demo-notes            # seeded into the profile; relative to the Omakase checkout
 music: demo-notes/backing-tracks/Mozart-The Marriage of Figaro.wav
+sfx: true                    # synthesised key and click sounds
+capture: { fps: 60, scale: 2 }
 
 setup:                       # before the camera rolls
   - keystroke-hud: on
@@ -100,6 +107,9 @@ setup:                       # before the camera rolls
 scenes:
   - name: across-the-vault
     steps:
+      - focus: "Find the recipe without leaving the keyboard"
+        on: "#noteSearch .note-search-card"
+        mark: ring
       - find: tiramisu       # an action and its value
         down: 1              # that action's other arguments
         lands: tiramisu
@@ -109,14 +119,21 @@ scenes:
 - A step names one action. `node bin/demo.mjs actions` lists them with their arguments. An unknown action or argument is rejected before the app starts.
 - **Pauses are rhythm, not logic.** Actions wait on the app's state and assert their result, so a screenplay runs unchanged at check speed. If a demo only works because of a pause, the action is missing a wait.
 - A step's address is `scene/action`, numbered when a scene repeats an action (`hello/pause-2`), or `scene/<id>` when the step sets `id:`.
-- **The escape hatch:** `- custom: steps.mjs#name` calls `export async function name(stage, step)` from a file beside the screenplay. Use it to try a move; when it earns its place, make it an action.
+- **`capture`**: the window is always 1280x720. `scale: 2` records 2560x1440, which is sharp up to about a 1.33x zoom in a 1080p film; `scale: 3` records 3840x2160 and is sharp to 2x. `cut` warns when the camera zooms past what the take can hold. `fps` is 24, 25, 30, 50 or 60, and the recording warns if the capture fell behind.
+- **`focus`** sets a caption and optional camera target. `mark: ring` or `mark: spotlight` also highlights the target until the next focus.
+- **The escape hatch:** `- custom: steps.mjs#name` calls `export async function name(stage, step)` from a file beside the screenplay. Use `stage.click(selector)` for clicks the viewer should see, so the pointer is drawn. When the move earns its place, make it an action.
+- Fixtures (notes, CSV, PDF) go beside the screenplay. `sushi: replies.mjs` scripts the model; `sushi: live` uses the profile in `OMAKASE_PROFILE`, and its output varies. `dictation: fixture` uses the app's voice fixture, not a microphone.
 
 ## Editing
 
-`edit.yaml` lays changes over the take. An edit names a span of the screenplay, never a second, so it means the same thing after the demo is recorded again. `node bin/demo.mjs spans <name>` lists the spans of the last take with their times.
+`edit.yaml` lays changes over the take. An edit names a span of the screenplay, never a second, so it means the same thing after the demo is recorded again.
 
 ```yaml
 edits:
+  - card: "Cache study"                               # a title card; holds the film at this point
+    subtitle: "From question to chart"
+    at: study@start
+    for: 2s                                           # default 2.2s, at most 10s
   - speed: 1.8                                        # 0.1 to 10
     over: hello/type@start+2.5s .. hello/type@end
   - cut: across-the-vault/pause                       # drop a span or a range
@@ -125,57 +142,59 @@ edits:
   - caption: "Find the recipe without leaving the keyboard"
     position: bottom                                  # or top; empty text hides a caption
     over: across-the-vault
+  - highlight: [0.3, 0.3, 0.4, 0.2]                   # x, y, width, height as fractions of the window
+    style: spotlight                                  # or ring (default)
+    over: table/pause
+  - keys: "Ctrl+Shift+F"                              # a key callout, for when the app's HUD is off
+    over: across-the-vault/find@start .. across-the-vault/find@start+2s
+  - transition: dip                                   # a short fade through the canvas colour
+    at: chart@start
+    for: 0.5s                                         # at most 2s
 ```
 
-A range is `point .. point`. A point is a span with `@start` or `@end` and an optional offset. A bare span means its start to its end.
+A range is `point .. point`. A point is a span with `@start` or `@end` and an optional offset. A bare span means its start to its end. A card at a scene's `@end` comes after it; put an end card at the last scene's `@end`.
 
-Anything `edit.yaml` cannot say can be done by hand in `out/<name>/project/`, a normal HyperFrames project. That folder is rebuilt by `cut`, so hand edits there are lost on the next cut.
+Anything `edit.yaml` cannot say can be done by hand in `out/<name>/project/`, a normal HyperFrames project. `cut` rebuilds that folder, so hand edits there are lost on the next cut.
+
+## Starting from narration (optional)
+
+The `draft` command turns a plain-English Markdown narration into a screenplay using Claude Code, checks it in the app, and repairs failures up to three times.
+
+- Narrations are any Markdown file under `screenplays/` (a loose `screenplays/quick tiramisu lookup.md` becomes the demo `quick-tiramisu-lookup`; a file in a folder belongs to that folder's demo), or vault notes whose first line is `# Screenplay: <title>`.
+- `draft` lists every narration and its state; `draft --all` drafts the new and changed ones; `draft "<name>"` drafts one.
+- It needs `claude` on the PATH. The narration and the demo vault's note names and headings are sent to Claude.
+- The narration is never copied or renamed. The screenplay's second line, `# Drafted from`, records its path and digest. A hand-written screenplay is not overwritten without `--force`; delete that line to take a drafted one over by hand.
+- Vaults searched: `~/.config/Electron/vault` and `~/.config/omakase/vault`, or the folders in `OMAKASE_NOTES`, separated by colons.
 
 ## How it fits together
 
 | Part | File | Knows about |
 | --- | --- | --- |
-| Action vocabulary | `actions/omakase.mjs` | Omakase's selectors, shortcuts, and waits. Nothing else does. |
-| Draft | `src/draft.mjs` | Finding narrations and turning them into screenplays with Claude |
+| Action vocabulary | `actions/omakase.mjs`, `actions/kit.mjs` | Omakase's selectors, shortcuts, and waits. Nothing else does. |
 | Screenplay | `src/screenplay.mjs` | Reading, validating, and compiling YAML into a performance |
-| Recorder | `src/recorder.mjs` | The private display, capture, paced keys, and the beat log |
+| Recorder | `src/recorder.mjs` | The private display, capture, paced keys and clicks, the beat log |
+| Takes | `src/takes.mjs` | Kept takes, switching, and splicing a retaken scene |
 | Director | `src/director.mjs` | Turning beats into camera shots |
-| Film plan | `src/film.mjs` | Shared cuts, camera timing, and captions for review/export |
-| Edit | `src/edit.mjs` | Spans, cuts, speed, and camera overrides |
-| Browser review | `src/review.mjs`, `review/` | Local playback, persistent edits, export jobs |
-| Project | `src/project.mjs`, `template/index.html` | The HyperFrames composition: logo, camera, music, close |
+| Edit | `src/edit.mjs` | Spans, cuts, speed, cards, and every other edit kind |
+| Film plan | `src/film.mjs`, `src/overlays.mjs` | Shared timing, pointer, overlays, and sounds for preview and export |
+| Sound | `src/sound.mjs` | Synthesised key and click sounds |
+| Project | `src/project.mjs`, `template/` | The HyperFrames composition |
+| Export | `src/export.mjs` | Presets made from the master |
+| Browser review | `src/review.mjs`, `review/` | Local playback, persistent edits, takes, export jobs |
+| Drafting | `src/draft.mjs` | Narrations to screenplays with Claude |
 
-`actions/omakase.mjs` is the part that breaks when the app changes. It is written to move into the Omakase repo beside a contract; until then, run the screenplays as a check from there:
+`actions/` is the part that breaks when the app changes. It is written to move into the Omakase repo beside a contract; until then, run the screenplays as a check from there:
 
 ```bash
 cd ../omakase-v2 && npm run check -- ../omakase-demo-factory/checks/screenplays.mjs
 ```
 
-## Additions from the demo kit
-
-The kit's interactions are reusable actions in `actions/kit.mjs`, using the factory's existing private Linux recorder and HyperFrames export:
-
-- `focus`: caption and optional CSS camera target; `on: wide` pulls back. A caption lasts until the next focus. Later automatic camera beats can move the framing; use a camera edit to hold it over a span.
-- `rename`, `project-tag`, `caret`, and `click`: composable app operations; click can assert a visible result or expected note text.
-- `inline-sushi`, `ask-sushi`, `card-action`: inline completions and card answers/merge. Use `reads` or `answer` to verify the result.
-- `csv-chart`, `open-pdf`, `pdf-passage`, `browser`: fixtures resolve relative to the screenplay folder. Browser navigation waits for the page load.
-- `dictation: fixture`: exercise recording/review/insertion with the app's voice fixture. This is a scripted transcript; it does not record a microphone.
-- `appearance: { theme: lumon, font: sf-new-york }`: optional top-level profile styling.
-- `sushi: live`: opt into the saved provider in `OMAKASE_PROFILE`, copied into the disposable profile. Output and latency may vary. `sushi: replies.mjs` retains the repeatable local model workflow.
-
-The imported interactions use state waits; unlike the original kit, errors are not converted into success notes. `node bin/demo.mjs actions` documents every argument. See `screenplays/kit-workflow/` for an example combining new interactions, a scripted answer, CSV chart, and fixture dictation.
-
-The kit's macOS screen recorder, machine-specific sync offset, and Swift editor are not needed in the Linux pipeline. Microphone capture, automatic audio-window editing, and the Mac recording backend remain unimplemented. The kit's supplied raw take is not copied into this repository.
-
 ## Current limits
 
-- A drawn mouse cursor. The recording has none, so scenes led by clicks need one added from logged click points.
-- Effects and overlays beyond caption pills in `edit.yaml`. Today they go into the template or the generated project by hand.
-- Export presets other than 1920x1080.
-- PDF/browser actions depend on the built app's selectors and browser/page availability. Check the relevant screenplay before filming. Live-provider and native microphone acceptance are separate from scripted checks.
+- Square and vertical presets letterbox the 16:9 film. A camera-following crop for phones is not built yet.
+- Voiceover and microphone capture are not built. The macOS recording backend from the original kit is not ported.
+- PDF and browser actions depend on the built app's selectors and on page availability. Check the relevant screenplay before filming. Live-provider runs are separate from scripted checks.
 
-## Development checks
+## Development
 
-`npm test` exercises edit timing, caption/camera behavior, and review persistence/conflict handling. `node bin/demo.mjs check <name>` performs a specific screenplay in the actual built app. `node checks/kit-surfaces.mjs` checks PDF selection and browser navigation using local fixtures. The factory never rebuilds the sibling app.
-
-The agent-first story workflow also draws on the local `brag` reference: concrete opening, real product workflow, readable pacing, and a short creative discussion before implementation. It does not recreate the app UI as animation.
+`npm test` covers edit timing, overlays, the pointer, sounds, the screenplay compiler, take splicing and switching, and the review server. CI runs it on every push. `node bin/demo.mjs check <name>` performs a screenplay in the actual built app, and `node checks/kit-surfaces.mjs` checks PDF selection and browser navigation using local fixtures.

@@ -46,6 +46,7 @@ if (new URLSearchParams(location.search).has("review")) {
     },
     true,
   );
+  const saved = JSON.stringify(window.__film.pieces);
   function applyFilm(film) {
     for (const el of media) el.pause();
     const camera = document.getElementById("camera"),
@@ -71,23 +72,15 @@ if (new URLSearchParams(location.search).has("review")) {
       });
     });
     old.slice(film.pieces.length).forEach((el) => el.remove());
-    document.querySelectorAll(".caption").forEach((el) => el.remove());
-    film.captions.forEach((caption, i) => {
-      const el = document.createElement("div"),
-        text = document.createElement("span");
-      el.id = `caption-${i}`;
-      el.className = `clip caption ${caption.position}`;
-      text.textContent = caption.text;
-      Object.assign(el.dataset, {
-        start: caption.start,
-        duration: caption.duration,
-        trackIndex: 3,
-      });
-      el.append(text);
-      root.append(el);
-    });
+    // The server draws the overlays from the plan, as it does for export.
+    document.getElementById("marks").innerHTML = film.html.camera;
+    document.getElementById("overlays").innerHTML = film.html.screen;
     const music = document.getElementById("music");
     if (music) music.dataset.duration = film.duration - film.logo;
+    // The key sounds were mixed for the saved cut. Keep them quiet while an
+    // unsaved preview has moved the keys.
+    const sfx = document.getElementById("sfx");
+    if (sfx) sfx.dataset.stale = String(JSON.stringify(film.pieces) !== saved);
     window.__film = film;
     window.__buildTimeline(film);
     media = [...document.querySelectorAll("video, audio")];
@@ -128,9 +121,10 @@ if (new URLSearchParams(location.search).has("review")) {
       const at =
         Number(el.dataset.mediaStart ?? 0) + Math.max(0, t - start) * rate;
       el.playbackRate = rate;
-      el.muted = el.tagName === "VIDEO" || !sound;
+      el.muted = el.tagName === "VIDEO" || !sound || el.dataset.stale === "true";
       if (el.tagName === "AUDIO") {
-        const fade = Math.min(1, Math.max(0, (end - t) / 1.4));
+        // Only the music fades out with the film.
+        const fade = el.id === "music" ? Math.min(1, Math.max(0, (end - t) / 1.4)) : 1;
         el.volume = Number(el.dataset.volume ?? 1) * fade;
       }
       if (active && Math.abs(el.currentTime - at) > (playing ? 0.2 : 0.015))
@@ -169,7 +163,7 @@ if (new URLSearchParams(location.search).has("review")) {
   try {
     seek(0, false, false);
     parent.postMessage(
-      { type: "demo-ready", music: !!document.getElementById("music") },
+      { type: "demo-ready", music: !!document.querySelector("audio") },
       location.origin,
     );
   } catch (error) {
