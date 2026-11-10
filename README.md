@@ -18,6 +18,64 @@ node bin/demo.mjs produce cache-chart  # check → record → cut → editable p
 
 The preview is local to this machine. Keep its process running.
 
+## Open the factory yourself
+
+From this repository, run:
+
+```bash
+npm start
+```
+
+Open **http://127.0.0.1:4310/**. The library lists recorded demos and imported videos. Choose **Import and edit** to upload a recording from your computer, or open an existing demo. Keep the terminal running; Ctrl+C stops the factory and its editors. For another port, use `npm start -- --port 4320`.
+
+Import accepts videos supported by FFmpeg (including MP4, MOV and WebM), up to 4 GB through the browser. It prepares a separate H.264 copy with the original sound and leaves your source untouched. The imported video opens as one `clip` on the timeline: Ctrl-drag any range and use the same edit cards and exports. Recording the Omakase app still requires its built checkout; importing and editing your own video does not.
+
+You can also import directly from the terminal:
+
+```bash
+node bin/demo.mjs import "/path/to/my recording.mov" my-demo
+node bin/demo.mjs preview my-demo    # resume it later
+```
+
+Imported projects keep `screenplays/<name>/video.json` and the shared `edit.yaml`; their managed footage lives under `out/<name>/takes/`. Do not delete `out/` if you want to keep imported or recorded footage.
+
+AI and manual edits use the same `edit.yaml` and the same cards. Effects written without browser metadata appear normally; adjacent effects over equivalent ranges combine into one card. With no unsaved changes, outside edits are picked up automatically, retain the recorded frame, and can be undone with **Undo**. If you have unsaved work, the editor asks you to reload instead of overwriting it.
+
+## Website video kit
+
+The kit is integrated as two editable demos: `website-tabs` follows links, navigates back, opens a right pane and types a finding; `website-sushi` asks about the illustrative conduit table, follows a PDF citation and merges the answer. Sushi uses **live Gemini**: set `GEMINI_API_KEY` (or `OMK_KEY`) in the environment before starting. Its wording and citation can vary. No scripted answer is substituted.
+
+Both use the kit's fixtures and a 1680×1000 window in Retro 82, with a still camera and no logo intro or closing fade.
+
+```bash
+node bin/demo.mjs produce website-tabs
+node bin/demo.mjs produce website-sushi  # requires a Gemini key in the environment
+# After reviewing the cut:
+node bin/demo.mjs themes website-tabs
+node bin/demo.mjs themes website-sushi
+node bin/demo.mjs themes website-tabs --only lumon,daylight
+```
+
+`themes` applies the current `edit.yaml` to the selected take and writes all 16 variants into `out/<name>/films/`: `<theme>-tabs.mp4` or `<theme>-sushi.mp4`, with matching `.webp` posters. Videos are 1440 pixels wide, silent H.264 at 30 fps, with fast-start metadata. Copy the finished files into the website's `images/themes/film/` folder when ready; this command does not publish them.
+
+The variants recolour one real recording using the kit's paired screenshots; they are not separate recordings of each theme. PDF panes use their own colour map. Long Sushi waits are cut to a second either side; an explicit speed edit over the wait takes precedence.
+
+The recorder uses an unused private Xvfb display, starting at `:90`, and a throwaway profile. Wayland is disabled for that process. The website demos also use a private session bus without desktop service activation, and external browser/file-manager opens are intercepted. You can keep using your desktop during a take. The separate `sushi: live` saved-profile mode retains the desktop keyring bus to decrypt saved credentials; the website's `sushi: gemini` mode does not need that exception.
+
+```bash
+node checks/recorder-isolation.mjs  # real-app recording, private display/bus, PDF readiness and cleanup
+node bin/demo.mjs luts             # rebuild missing or stale maps from themes/refs/
+```
+
+To refresh references after an app theme/layout change, add `theme-refs: ../../themes/refs` as the last step of a screenplay with the PDF open and a representative note and Sushi card visible. Run `check <name>` and then `luts`. These captures replace paired screenshots; keep every theme in the same app state. Generated colour maps stay in `out/luts/`.
+
+If `/tmp` is constrained, use disk-backed temporary storage:
+
+```bash
+mkdir -p out/tmp/omakase-check
+TMPDIR="$PWD/out/tmp" node bin/demo.mjs produce website-tabs
+```
+
 ## What a film has
 
 - **The real app, at 60 fps.** Each take records the built app on a private display. Nothing is recreated.
@@ -31,13 +89,15 @@ The preview is local to this machine. Keep its process running.
 
 `node bin/demo.mjs preview <name>` resumes an existing take in the browser editor and prints its URL. Use `--port 4317` for a stable port.
 
-- The timeline sits inside the playback window: scenes on the top row, steps below. Click a block to jump, or drag the playhead to scrub.
-- For the selected moment you can change the kept start and end, remove it, change its speed, set a caption, or place the camera. Drag the window on the grid to place it; arrow keys move it and Home centres it.
-- Changes preview instantly. Save writes them; Discard restores the saved cut; Undo reverts the last save in this browser session.
+- The timeline shows only major scenes. Click an event to jump, or drag the playhead to scrub.
+- **Ctrl-click and drag** anywhere on the timeline to create an edit range, or use **Add edit**. Adjust its start/end in seconds or drag the range's edge handles.
+- Each edit is a collapsible card. Use **Add an effect** to combine captions, Zoom, speed, removal, highlights, key callouts or title cards. Only selected effects show their controls. Every range stays on the timeline even when its card is collapsed; drag the window to move it or its edges to resize it. Nearby borders snap together; keep dragging to pull through a snap, or hold Alt to bypass snapping.
+- Position captions, highlights and key callouts directly on the preview. Drag their rectangle to move it or its corner to resize it; arrow keys also move it. The actual caption/callout renders while paused. Zoom has a framing grid and previews its target immediately.
+- Changes preview and persist automatically; there is no Save or Discard step. The Undo icon reverses edits (continuous typing or dragging is grouped). Space plays/pauses, except while typing in a control. Title cards have their own duration field and pause the footage and original audio before resuming the same frame.
 - **Take** switches to any kept recording. A take whose spans no longer match the saved edits is refused, with the reason.
 - **Format** and **Export** render in the background and offer a download when ready.
 
-Save writes `screenplays/<name>/edit.yaml`, the same file the agent edits. Every browser save keeps the previous file under `out/<name>/edit-history/`. Agent changes are picked up automatically when there is no unsaved preview; otherwise Reload resolves the conflict. The preview and the export share one film plan, so the overlays match. Preview playback uses browser decoding, so check the final file for frame-accurate delivery.
+Auto-apply writes `screenplays/<name>/edit.yaml`, the same file the agent edits. Each persisted revision keeps the previous file under `out/<name>/edit-history/`. Agent changes are picked up automatically when there is no unsaved preview; otherwise Reload resolves the conflict. The preview and the export share one film plan, so the overlays match. Preview playback uses browser decoding, so check the final file for frame-accurate delivery.
 
 For conversational revisions the agent edits `edit.yaml` and runs `cut`. Only performance or content changes need a new recording, and often only of one scene (see Retakes).
 
@@ -47,6 +107,8 @@ For conversational revisions the agent edits `edit.yaml` and runs `cut`. Only pe
 
 ```bash
 node bin/demo.mjs doctor                         # prerequisites, and whether the screenplays were checked against this app build
+npm start                                       # local library and video import -> http://127.0.0.1:4310/
+node bin/demo.mjs import <video> [name]           # import a recording and start its editor
 node bin/demo.mjs actions                        # what a screenplay can ask the app to do
 node bin/demo.mjs validate                       # YAML only, no app
 node bin/demo.mjs check                          # every screenplay at full speed, no recording
@@ -58,6 +120,8 @@ node bin/demo.mjs takes <name> [id]              # list kept takes, or switch to
 node bin/demo.mjs spans <name>                   # the take's spans and times, for writing edits
 node bin/demo.mjs cut <name>                     # apply edit.yaml -> out/<name>/project/
 node bin/demo.mjs render <name> [--preset p]     # -> out/<name>/<name>.mp4, or <name>-<preset>.<ext>
+node bin/demo.mjs themes <name> [--only lumon]   # website variants and posters -> out/<name>/films/
+node bin/demo.mjs luts                          # theme maps -> out/luts/
 node bin/demo.mjs make <name>                    # record, cut, render
 node bin/demo.mjs draft [note]                   # optional: narration file -> screenplay, using Claude Code
 node bin/demo.mjs context                        # vocabulary and paths as JSON, for agents
@@ -119,7 +183,8 @@ scenes:
 - A step names one action. `node bin/demo.mjs actions` lists them with their arguments. An unknown action or argument is rejected before the app starts.
 - **Pauses are rhythm, not logic.** Actions wait on the app's state and assert their result, so a screenplay runs unchanged at check speed. If a demo only works because of a pause, the action is missing a wait.
 - A step's address is `scene/action`, numbered when a scene repeats an action (`hello/pause-2`), or `scene/<id>` when the step sets `id:`.
-- **`capture`**: the window is always 1280x720. `scale: 2` records 2560x1440, which is sharp up to about a 1.33x zoom in a 1080p film; `scale: 3` records 3840x2160 and is sharp to 2x. `cut` warns when the camera zooms past what the take can hold. `fps` is 24, 25, 30, 50 or 60, and the recording warns if the capture fell behind.
+- **`capture`**: the window defaults to 1280x720; `window: [1680, 1000]` changes its shape (each dimension must be between 640 and 2560 pixels). `scale: 2` records 2560x1440, which is sharp up to about a 1.33x zoom in a 1080p film; `scale: 3` records 3840x2160 and is sharp to 2x. `cut` warns when the camera zooms past what the take can hold. `fps` is 24, 25, 30, 50 or 60, and the recording warns if the capture fell behind.
+- **`film`**: `intro: none` removes the logo, `outro: none` removes the closing fade, and `camera: still` holds the whole window unless a saved camera edit overrides it. `slug: tabs` chooses the website filename suffix; `poster: 18` chooses the poster time in seconds. The film keeps the recorded window's aspect ratio.
 - **`focus`** sets a caption and optional camera target. `mark: ring` or `mark: spotlight` also highlights the target until the next focus.
 - **The escape hatch:** `- custom: steps.mjs#name` calls `export async function name(stage, step)` from a file beside the screenplay. Use `stage.click(selector)` for clicks the viewer should see, so the pointer is drawn. When the move earns its place, make it an action.
 - Fixtures (notes, CSV, PDF) go beside the screenplay. `sushi: replies.mjs` scripts the model; `sushi: live` uses the profile in `OMAKASE_PROFILE`, and its output varies. `dictation: fixture` uses the app's voice fixture, not a microphone.
@@ -155,6 +220,8 @@ edits:
 A range is `point .. point`. A point is a span with `@start` or `@end` and an optional offset. A bare span means its start to its end. A card at a scene's `@end` comes after it; put an end card at the last scene's `@end`.
 
 Anything `edit.yaml` cannot say can be done by hand in `out/<name>/project/`, a normal HyperFrames project. `cut` rebuilds that folder, so hand edits there are lost on the next cut.
+
+Captions can also use `box: [x, y, width, height]` as fractions of the picture instead of the legacy top/bottom placement. Key callouts also accept `box`. Highlights use screen coordinates by default; `space: camera` attaches one to the footage instead. The browser writes span-anchored ranges and a `review: { id, collapsed }` marker to keep combined effects in one card. Recorded automatic Zoom/caption/highlight direction appears as ordinary cards, too. After the first browser change, `recordedEdits: false` makes those explicit edits authoritative; preserve this flag when editing with an agent. Legacy transition entries still render, but Transition is no longer in the effect picker.
 
 ## Starting from narration (optional)
 
@@ -197,4 +264,4 @@ cd ../omakase-v2 && npm run check -- ../omakase-demo-factory/checks/screenplays.
 
 ## Development
 
-`npm test` covers edit timing, overlays, the pointer, sounds, the screenplay compiler, take splicing and switching, and the review server. CI runs it on every push. `node bin/demo.mjs check <name>` performs a screenplay in the actual built app, and `node checks/kit-surfaces.mjs` checks PDF selection and browser navigation using local fixtures.
+`npm test` covers edit timing, overlays, the pointer, sounds, the screenplay compiler, take splicing and switching, the review server, display selection and website export. It needs FFmpeg; CI installs it and runs the suite on every push. `node bin/demo.mjs check <name>` performs a screenplay in the actual built app. `node checks/kit-surfaces.mjs` checks PDF selection and browser navigation using local fixtures; `node checks/recorder-isolation.mjs` checks private display/bus recording, PDF page readiness and cleanup.

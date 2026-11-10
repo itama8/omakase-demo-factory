@@ -9,6 +9,7 @@ import { compileEdit, spansOf } from "./edit.mjs";
 import { planFilm } from "./film.mjs";
 import { exportFile, PRESETS } from "./export.mjs";
 import { listTakes, useTake } from "./takes.mjs";
+import { editableDocument } from "./recorded-edits.mjs";
 
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const missing = (error) => { if (error.code === "ENOENT") return ""; throw error; };
@@ -16,16 +17,17 @@ const fail = (message, status = 400) => Object.assign(new Error(message), { stat
 const mime = { ".html": "text/html", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".mp4": "video/mp4", ".m4a": "audio/mp4", ".png": "image/png", ".ttf": "font/ttf", ".webm": "video/webm", ".gif": "image/gif" };
 
 /** Local editable review, deliberately independent of a particular model CLI. */
-export async function serveReview({ root, name, build, port = 0, renderCommand }) {
+export async function serveReview({ root, name, title = name.replaceAll('-', ' '), factoryUrl = null, build, port = 0, renderCommand, film: shape = {} }) {
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("Demo name must contain lowercase letters, digits and dashes");
   const out = path.join(root, "out", name), file = path.join(root, "screenplays", name, "edit.yaml");
   let busy = false, job = { state: "idle", log: "" }, child;
   const readState = async () => {
     const [source, takeText] = await Promise.all([readFile(file, "utf8").catch(missing), readFile(path.join(out, "take.json"), "utf8")]);
     const take = JSON.parse(takeText), document = parse(source) ?? { edits: [] };
-    const film = planFilm(take, compileEdit(document, take.beats));
+    const film = planFilm(take, compileEdit(document, take.beats), shape);
+    const editable = editableDocument(take, document, shape);
     const revision = hash(source + takeText);
-    return { name, revision, edits: document.edits ?? [], spans: spansOf(take.beats), film, takes: await listTakes(out), presets: Object.fromEntries(Object.entries(PRESETS).map(([id, preset]) => [id, preset.summary])), job: { ...job, current: job.revision === revision }, source };
+    return { name, title, factoryUrl, revision, edits: editable.edits ?? [], recordedEdits: editable.recordedEdits ?? true, spans: spansOf(take.beats), film, takes: await listTakes(out), presets: Object.fromEntries(Object.entries(PRESETS).map(([id, preset]) => [id, preset.summary])), job: { ...job, current: job.revision === revision }, source };
   };
   // Fail before announcing a link if there is no usable take.
   await readState();
@@ -73,7 +75,7 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
         if (data.revision !== current.revision) throw fail("Saved edits changed. Reload to continue.", 409);
         if (!Array.isArray(data.edits)) throw fail("edits must be an array");
         const take = JSON.parse(await readFile(path.join(out, "take.json"), "utf8"));
-        json(res, 200, { film: planFilm(take, compileEdit({ edits: data.edits }, take.beats)) });
+        json(res, 200, { film: planFilm(take, compileEdit({ edits: data.edits, ...(data.recordedEdits === undefined ? {} : {recordedEdits:data.recordedEdits}) }, take.beats), shape) });
         return;
       }
       if (req.method === "POST" && url.pathname === "/api/edit") {
@@ -84,14 +86,15 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
           if (data.revision !== current.revision) throw fail("The agent or another browser changed this demo. Reload before saving.", 409);
           if (!Array.isArray(data.edits)) throw fail("edits must be an array");
           const take = JSON.parse(await readFile(path.join(out, "take.json"), "utf8"));
-          planFilm(take, compileEdit({ edits: data.edits }, take.beats));
+          planFilm(take, compileEdit({ edits: data.edits, ...(data.recordedEdits === undefined ? {} : {recordedEdits:data.recordedEdits}) }, take.beats), shape);
           const document = parseDocument(current.source || "edits: []\n");
           document.set("edits", data.edits);
+          if(data.recordedEdits!==undefined)document.set("recordedEdits",data.recordedEdits);
           await mkdir(path.join(out, "edit-history"), { recursive: true });
           await writeFile(path.join(out, "edit-history", `${Date.now()}-${randomUUID()}.yaml`), current.source);
           const pending = `${file}.${randomUUID()}.tmp`;
           await writeFile(pending, String(document)); await rename(pending, file);
-          try { await build(); }
+          try { if(!data.deferBuild) await build(); }
           catch (error) { await writeFile(file, current.source); await build().catch(() => {}); throw error; }
           const { source, ...state } = await readState(); json(res, 200, state);
         } finally { busy = false; }
@@ -106,7 +109,7 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
           if (!current.takes.some((take) => take.id === data.id)) throw fail("No such take", 404);
           // The saved edits must still name spans the other take has.
           const candidate = JSON.parse(await readFile(path.join(out, "takes", data.id, "take.json"), "utf8"));
-          try { planFilm(candidate, compileEdit(parse(current.source) ?? { edits: [] }, candidate.beats)); }
+          try { planFilm(candidate, compileEdit(parse(current.source) ?? { edits: [] }, candidate.beats), shape); }
           catch (error) { throw fail(`That take does not fit the saved edits: ${error.message}`, 409); }
           const before = current.takes.find((take) => take.current)?.id;
           await useTake(out, data.id);
@@ -139,7 +142,7 @@ export async function serveReview({ root, name, build, port = 0, renderCommand }
       if (!["GET", "HEAD"].includes(req.method)) throw fail("Method not allowed", 405);
       if (url.pathname === "/") return await sendFile(req, res, path.join(root, "review/index.html"), path.join(root, "review"));
       if (url.pathname.startsWith("/project/")) return await sendFile(req, res, path.resolve(out, "." + decodeURIComponent(url.pathname)), path.join(out, "project"));
-      if (["/review.js", "/review.css", "/edits.js", "/timeline.js", "/camera-grid.js"].includes(url.pathname)) return await sendFile(req, res, path.join(root, "review", url.pathname.slice(1)), path.join(root, "review"));
+      if (["/review.js", "/review.css", "/edits.js", "/timeline.js", "/camera-grid.js", "/range-edits.js", "/snapping.js"].includes(url.pathname)) return await sendFile(req, res, path.join(root, "review", url.pathname.slice(1)), path.join(root, "review"));
       if (url.pathname === "/download") {
         const state = await readState();
         if (job.state !== "ready" || job.revision !== state.revision) throw fail("Export the current edit first", 409);

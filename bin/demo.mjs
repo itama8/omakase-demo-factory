@@ -4,17 +4,22 @@ import { spawnSync } from "node:child_process";
 import { existsSync, statSync } from "node:fs";
 import { mkdir, open, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
+import { parse } from "yaml";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { actions, app } from "../actions/omakase.mjs";
 import { draft, findNarrations, resolveNarration } from "../src/draft.mjs";
 import { spansOf } from "../src/edit.mjs";
 import { buildProject } from "../src/project.mjs";
+import { filmOptions, filmSize } from "../src/film.mjs";
 import { recordTake } from "../src/recorder.mjs";
 import { loadScreenplay } from "../src/screenplay.mjs";
 import { serveReview } from "../src/review.mjs";
 import { exportFile, exportPreset, PRESETS } from "../src/export.mjs";
 import { listTakes, spliceBeats, spliceVideo, useTake } from "../src/takes.mjs";
+import { BASE_THEME, ensureLuts, recolourTake, webExport } from "../src/themes.mjs";
+import { importVideo, importedSettings } from "../src/import-video.mjs";
+import { serveFactory, libraryProjects } from "../src/factory.mjs";
 
 // Pinned, so a render today and a render next month use the same renderer.
 const HYPERFRAMES = "hyperframes@0.9.30";
@@ -24,6 +29,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const omakaseRoot = process.env.OMAKASE_ROOT ?? (existsSync("scripts/app-session.mjs") ? process.cwd() : path.resolve(root, "../omakase-v2"));
 const usage = `Usage: node bin/demo.mjs <command> [screenplay]
 
+  start              start the local video library (--port 4310 by default)
+  import <file> [name]  import your own video and start its editor
   doctor             check local recording and rendering prerequisites
   init <name> <idea>  start a demo from an idea; the agent maintains the script
   context            print the action vocabulary and existing demos as JSON
@@ -44,13 +51,16 @@ const usage = `Usage: node bin/demo.mjs <command> [screenplay]
   studio <name>      open the cut in HyperFrames Studio
   render <name>      render the cut                   -> out/<name>/<name>.mp4
                      --preset ${Object.keys(PRESETS).join(" | ")}
+  themes <name>      render the take in every theme for the website  -> out/<name>/films/
+                     --only lumon,daylight to choose themes
+  luts               rebuild the theme colour maps from themes/refs/
   make <name>        record, cut, and render`;
 
 const [command, ...rest] = process.argv.slice(2);
 const names = [], options = {};
 for (let index = 0; index < rest.length; index++) {
   const arg = rest[index];
-  if (["--port", "--preset", "--at"].includes(arg)) options[arg.slice(2)] = rest[++index];
+  if (["--port", "--preset", "--at", "--only"].includes(arg)) options[arg.slice(2)] = rest[++index];
   else if (arg === "--force" || arg === "--all") options[arg.slice(2)] = true;
   else names.push(arg);
 }
@@ -63,9 +73,11 @@ const at = options.at === undefined ? undefined : Number(options.at);
 if (at !== undefined && !(at >= 0)) throw new Error("--at needs a time in seconds");
 const out = (name) => path.join(root, "out", name);
 const safeName = (name) => { if (!/^[a-z0-9][a-z0-9-]*$/.test(name ?? "")) throw new Error("Demo name must contain lowercase letters, digits and dashes"); return name; };
-const load = (name) => loadScreenplay(path.join(root, "screenplays", safeName(name), "screenplay.yaml"), { actions, app, omakaseRoot });
-const hyperframes = (name, ...args) => {
-  const result = spawnSync("npx", ["--yes", HYPERFRAMES, ...args], { cwd: path.join(out(name), "project"), stdio: "inherit" });
+const load = (name) => existsSync(path.join(root, "screenplays", safeName(name), "video.json")) ? importedSettings(root, name) : loadScreenplay(path.join(root, "screenplays", name, "screenplay.yaml"), { actions, app, omakaseRoot });
+const refs = path.join(root, "themes", "refs"), luts = path.join(root, "out", "luts");
+const hyperframes = (name, ...args) => hyperframesIn(path.join(out(name), "project"), ...args);
+const hyperframesIn = (cwd, ...args) => {
+  const result = spawnSync("npx", ["--yes", HYPERFRAMES, ...args], { cwd, stdio: "inherit" });
   if (result.status !== 0) throw new Error(`hyperframes ${args[0]} failed`);
 };
 function one() {
@@ -79,6 +91,7 @@ const checkedFile = path.join(root, "out", "checked.json");
 
 async function perform(name, options) {
   const play = await load(name);
+  if (play.imported) throw new Error(`${name} is an imported video. Use preview, cut or render to edit it; it has no app performance to record.`);
   const started = Date.now();
   const took = () => ((Date.now() - started) / 1000).toFixed(1);
   const base = { scenario: play.scenario, omakaseRoot, seed: play.seed, ...play.capture };
@@ -96,7 +109,7 @@ async function perform(name, options) {
     if (options.only) {
       // Film the one scene the way the take in use was filmed, then splice it in.
       const old = JSON.parse(await readFile(path.join(out(name), "take.json"), "utf8").catch(() => { throw new Error(`${name}: no take to splice into. Run "record ${name}" first.`); }));
-      const part = await recordTake({ ...base, fps: old.fps, scale: old.window.scale, outDir: path.join(folder, "part"), ...options });
+      const part = await recordTake({ ...base, fps: old.fps, scale: old.window.scale, width: old.window.width, height: old.window.height, outDir: path.join(folder, "part"), ...options });
       const { beats, segments, joins } = spliceBeats(old, part, options.only);
       await spliceVideo({ oldVideo: path.join(out(name), old.video ?? "take.mp4"), partVideo: path.join(folder, "part", "take.mp4"), segments, fps: old.fps, file: path.join(folder, "take.mp4") });
       take = { ...old, spliced: options.only, duration: beats.at(-1).t, beats, joins };
@@ -112,7 +125,7 @@ async function perform(name, options) {
 }
 async function cut(name) {
   const play = await load(name);
-  const built = await buildProject({ root, omakaseRoot, name, music: play.music, sfx: play.sfx });
+  const built = await buildProject({ root, omakaseRoot, name, music: play.music, sfx: play.sfx, film: play.film });
   console.log(`${name}: cut to ${built.duration.toFixed(1)}s at ${built.fps} fps in ${built.pieces} piece(s), ${built.shots} shots, ${built.edits} edit(s) -> ${built.project}`);
   if (built.closest > built.sharp + 0.01) console.log(`  Note: the closest shot zooms ${built.closest.toFixed(2)}x, and this take is sharp to ${built.sharp.toFixed(2)}x. For crisp close-ups set "capture: { scale: 3 }" in the screenplay and record again.`);
 }
@@ -133,15 +146,29 @@ function render(name) {
 const demos = async () => (await readdir(path.join(root, "screenplays"), { withFileTypes: true })).filter((entry) => entry.isDirectory() && existsSync(path.join(root, "screenplays", entry.name, "screenplay.yaml"))).map((entry) => entry.name).sort();
 async function review(name) {
   await cut(name);
-  await serveReview({ root, name, port, build: () => cut(name) });
+  const play = await load(name);
+  await serveReview({ root, name, title: play.title, port, build: () => cut(name), film: filmOptions(play.film) });
 }
 
 const commands = {
+  async start() {
+    if (names.length) throw new Error('start takes no demo name; open a demo from the library.');
+    const factory = await serveFactory({root,omakaseRoot,port:options.port === undefined ? 4310 : port});
+    const stop = () => factory.close().finally(() => process.exit(0));
+    process.once('SIGINT',stop);process.once('SIGTERM',stop);
+  },
+  async import() {
+    if (names.length < 1 || names.length > 2) throw new Error('import takes a video path and an optional demo name.');
+    const imported = await importVideo({root,source:names[0],name:names[1]});
+    console.log(`${imported.name}: imported ${imported.take.duration.toFixed(1)}s. Your original file was not changed.`);
+    await review(imported.name);
+  },
   async doctor() {
     const checks = [
       ["Node.js 22+", Number(process.versions.node.split(".")[0]) >= 22],
       ["Linux recording", process.platform === "linux"],
       ["Xvfb", spawnSync("Xvfb", ["-help"], { stdio: "ignore" }).error?.code !== "ENOENT"],
+      ["Private session bus (dbus-daemon)", spawnSync("dbus-daemon", ["--version"], { stdio: "ignore" }).status === 0],
       ["FFmpeg", spawnSync("ffmpeg", ["-version"], { stdio: "ignore" }).status === 0],
       ["Built Omakase", existsSync(path.join(omakaseRoot, "dist/main.js")) && existsSync(path.join(omakaseRoot, "scripts/app-session.mjs"))]
     ];
@@ -160,7 +187,7 @@ const commands = {
     console.log(`Started ${name}: ${dir}/story.md\nDiscuss the story with the user, then maintain screenplay.yaml behind the scenes.\nRead .agents/skills/omakase-demo/SKILL.md for the workflow.`);
   },
   async context() {
-    console.log(JSON.stringify({ root, omakaseRoot, defaultVault: path.join(omakaseRoot, app.defaultVault), demos: await demos(), actions: Object.fromEntries(Object.entries(actions).map(([name, { summary, args, setupOnly }]) => [name, { summary, args, setupOnly }])) }, null, 2));
+    console.log(JSON.stringify({ root, omakaseRoot, defaultVault: path.join(omakaseRoot, app.defaultVault), demos: await demos(), videos: await libraryProjects(root), actions: Object.fromEntries(Object.entries(actions).map(([name, { summary, args, setupOnly }]) => [name, { summary, args, setupOnly }])) }, null, 2));
   },
   async validate() {
     for (const name of names.length ? names : await demos()) { await load(name); console.log(`${name}: valid`); }
@@ -227,6 +254,42 @@ const commands = {
     console.log(`${take.name}: rehearsed ${take.duration.toFixed(1)}s, nothing saved`);
   },
   record: () => record(one()),
+  async luts() {
+    const themes = await ensureLuts(refs, luts, options.only?.split(","));
+    console.log(`colour maps current for ${themes.length} themes -> ${luts}`);
+  },
+  async themes() {
+    const name = one(), play = await load(name);
+    if (play.imported) throw new Error('Theme recolouring needs a Retro 82 app recording. Use render to export your imported video.');
+    if (play.scenario.appearance?.theme !== BASE_THEME) throw new Error(`${name}: themes recolours a take recorded in ${BASE_THEME}. Set "appearance: { theme: ${BASE_THEME} }" in the screenplay and record again.`);
+    const take = JSON.parse(await readFile(path.join(out(name), "take.json"), "utf8"));
+    if (take.appearance?.theme && take.appearance.theme !== BASE_THEME) throw new Error(`${name}: the recorded take uses ${take.appearance.theme}; record it again in ${BASE_THEME} before recolouring.`);
+    const only = options.only?.split(",");
+    const themes = [BASE_THEME, ...await ensureLuts(refs, luts, only)].filter((theme) => !only || only.includes(theme));
+    const slug = play.film.slug ?? name, films = path.join(out(name), "films");
+    await mkdir(films, { recursive: true });
+    const source = path.join(out(name), take.video ?? "take.mp4");
+    // A camera that never zooms needs no more pixels than the film has, so recolour at the film's size.
+    const edits = parse(await readFile(path.join(root, "screenplays", name, "edit.yaml"), "utf8").catch(() => "")) ?? {};
+    const still = filmOptions(play.film).camera === "still" && !(edits.edits ?? []).some((edit) => "camera" in edit);
+    const fit = still ? filmSize(take.window) : null;
+    for (const theme of themes) {
+      const started = Date.now(), dir = path.join(out(name), "themes", theme);
+      await rm(dir, { recursive: true, force: true });
+      await mkdir(dir, { recursive: true });
+      const video = theme === BASE_THEME ? source : path.join(dir, "take.mp4");
+      if (theme !== BASE_THEME) await recolourTake({ source, file: video, theme, take, luts, fit });
+      const project = path.join(dir, "project");
+      await buildProject({ root, omakaseRoot, name, music: play.music, sfx: play.sfx, film: play.film, video, out: project });
+      // The website plays films silently at 30 frames a second, so render no more than that.
+      hyperframesIn(project, "render", "--quiet", "--fps", "30", "--output", path.join(dir, "film.mp4"));
+      const file = path.join(films, `${theme}-${slug}.mp4`);
+      webExport({ master: path.join(dir, "film.mp4"), file, poster: play.film.poster ?? 0 });
+      await rm(dir, { recursive: true, force: true });
+      console.log(`${theme}: ${path.relative(root, file)} (${((Date.now() - started) / 1000).toFixed(0)}s)`);
+    }
+    console.log(`${name}: ${themes.length} theme(s) -> ${films}`);
+  },
   async retake() {
     const [rawName, scene] = names, name = safeName(rawName);
     if (names.length !== 2) throw new Error(`"retake" takes a screenplay name and a scene.\n\n${usage}`);

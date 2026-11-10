@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Omakase · Demo factory</title>
+    <link rel="stylesheet" href="/factory.css" />
+    <script type="module" src="/factory.js"></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/"
+        ><svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="34"
+          height="34"
+          viewBox="0 0 1024 1024"
+          aria-hidden="true"
+        >
+          <defs>
+            <radialGradient id="surface" cx="43%" cy="30%" r="82%">
+              <stop offset="0" stop-color="#24221d" />
+              <stop offset="0.48" stop-color="#151513" />
+              <stop offset="1" stop-color="#090909" />
+            </radialGradient>
+            <radialGradient id="aura" cx="50%" cy="48%" r="50%">
+              <stop offset="0" stop-color="#cfc09a" stop-opacity="0.13" />
+              <stop offset="0.48" stop-color="#cfc09a" stop-opacity="0.045" />
+              <stop offset="1" stop-color="#cfc09a" stop-opacity="0" />
+            </radialGradient>
+            <linearGradient id="edge" x1="0" y1="0" x2="1" y2="1">
+              <stop offset="0" stop-color="#6d624a" stop-opacity="0.52" />
+              <stop offset="0.42" stop-color="#3a3529" stop-opacity="0.26" />
+              <stop offset="1" stop-color="#090909" stop-opacity="0.76" />
+            </linearGradient>
+          </defs>
+          <rect
+            x="44"
+            y="54"
+            width="936"
+            height="936"
+            rx="224"
+            fill="#000000"
+            opacity="0.42"
+          />
+          <rect
+            x="44"
+            y="42"
+            width="936"
+            height="936"
+            rx="224"
+            fill="url(#surface)"
+          />
+          <rect
+            x="45.5"
+            y="43.5"
+            width="933"
+            height="933"
+            rx="222.5"
+            fill="none"
+            stroke="url(#edge)"
+            stroke-width="3"
+          />
+          <ellipse cx="512" cy="500" rx="346" ry="360" fill="url(#aura)" />
+          <text
+            x="512"
+            y="526"
+            text-anchor="middle"
+            dominant-baseline="central"
+            font-family="Noto Sans JP"
+            font-size="560"
+            font-weight="500"
+            fill="#cfc09a"
+          >
+            任
+          </text>
+        </svg>
+        <span class="brand-name">Omakase</span
+        ><span class="brand-divider">/</span
+        ><span class="brand-section">demo factory</span></a
+      >
+    </header>
+    <main>
+      <section class="import-panel" aria-label="Import video">
+        <form id="import-form">
+          <label for="video">Video</label>
+          <div class="video-field">
+            <input
+              class="visually-hidden"
+              id="video"
+              name="video"
+              type="file"
+              accept="video/*,.mkv,.mov,.webm,.mp4"
+              aria-describedby="file-name"
+              required
+            />
+            <label
+              class="file-picker"
+              for="video"
+              title="Choose video"
+              aria-label="Choose video"
+            >
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="1.7"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                aria-hidden="true"
+              >
+                <path
+                  d="M12 16V3m-4 4 4-4 4 4M4 15v5a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-5"
+                />
+              </svg>
+            </label>
+            <span id="file-name">Choose a video</span>
+          </div>
+          <label for="title" class="title-label"
+            >Title <span>(optional)</span></label
+          >
+          <input
+            id="title"
+            name="title"
+            type="text"
+            maxlength="160"
+            placeholder="My recording"
+          />
+          <button id="import" type="submit">Import and edit</button>
+          <p class="hint">MP4, MOV, WebM · up to 4 GB</p>
+          <p id="import-status" role="status" aria-live="polite" hidden></p>
+        </form>
+      </section>
+      <section aria-label="Video library">
+        <div class="section-heading">
+          <h2>Your demos</h2>
+          <button id="refresh" type="button">Refresh</button>
+        </div>
+        <p id="library-status" role="status"></p>
+        <div id="projects"></div>
+      </section>
+    </main>
+  </body>
+</html>

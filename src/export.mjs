@@ -4,7 +4,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 
 const CANVAS = "0x07171d";
-const fit = (width, height) => `scale=${width}:-2:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${CANVAS}`;
+const fit = (width, height) => `scale=${width}:${height}:force_original_aspect_ratio=decrease:force_divisible_by=2:flags=lanczos,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:color=${CANVAS}`;
 const audio = ["-c:a", "aac", "-b:a", "192k"];
 const h264 = ["-c:v", "libx264", "-preset", "slow", "-crf", "17", "-pix_fmt", "yuv420p", "-movflags", "+faststart"];
 

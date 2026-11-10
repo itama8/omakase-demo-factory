@@ -1,0 +1,37 @@
+title: Tabs and panes
+vault: ../omakase-demo-factory/screenplays/website-tabs/vault
+appearance: { theme: retro-82, font: plex-notebook }
+capture: { window: [1680, 1000] }
+film: { intro: none, outro: none, camera: still, slug: tabs, poster: 18 }
+
+setup:
+  - sidebar: open
+  - open-note: Trunk main
+
+scenes:
+  - name: links
+    steps:
+      - pause: 1.5s
+      - follow-link: Sewer check
+      - pause: 1.8s
+      - back: Trunk main
+      - pause: 1.6s
+      - follow-link: Design basis
+      - pause: 1.6s
+  - name: panes
+    steps:
+      - note-menu: Sewer check
+        choose: right-pane
+      - pause: 2s
+      - tab: Trunk main
+      - pause: 1.3s
+  - name: note
+    steps:
+      - caret: "then rerun the model."
+      - press: End
+      - press: Enter
+        times: 2
+        gap: 120ms
+      - type: "C-03 is the slowest at 0.55 m/s."
+        wpm: 55
+      - pause: 1.8s

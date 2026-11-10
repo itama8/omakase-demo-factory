@@ -35,11 +35,16 @@ test("durations read as seconds, and a mistake names the fix", () => {
 test("steps get stable addresses, numbered when an action repeats in a scene", async () => {
   const play = await load(`scenes:\n  - name: hi\n    steps:\n      - say: a\n      - say: b\n        loud: "yes"\n      - pause: 1s\n        id: breath\n`);
   assert.deepEqual(play.spans, ["hi", "hi/say", "hi/say-2", "hi/breath"]);
-  assert.deepEqual(play.capture, { fps: 60, scale: 2 });
+  assert.deepEqual(play.capture, { fps: 60, scale: 2, width: 1280, height: 720 });
   assert.equal(play.sfx, false);
   const s = stage();
   await play.scenario.perform(s);
   assert.deepEqual(s.log, ["[hi", "[hi/say", "a", "hi/say]", "[hi/say-2", "B", "hi/say-2]", "[hi/breath", "pause 1000", "hi/breath]", "hi]"]);
+});
+
+test("an action without a value can be named on its own", async () => {
+  const play = await load(`scenes:\n  - name: a\n    steps:\n      - hush\n`.replace("hush", "say")).catch((error) => error);
+  assert.match(play.message, /"say" needs a value/);
 });
 
 test("a single-scene retake can run the lead-in, then only its scene", async () => {
@@ -60,14 +65,21 @@ test("the loader rejects what it cannot perform before the app starts", async ()
   await bad("scenes:\n  - name: a\n    steps: [{ hud: on }]\n", /only works in setup/);
   await bad("scenes:\n  - name: a\n    steps: [{ say: x, id: k }, { say: y, id: k }]\n", /used twice/);
   await bad("capture: { fps: 45 }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /capture.fps/);
-  await bad("capture: { zoom: 2 }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /capture takes fps and scale/);
+  await bad("capture: { zoom: 2 }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /capture takes fps, scale and window/);
   await bad("sfx: loud\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /sfx must be true or false/);
+  await bad("capture: { window: [100, 100] }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /capture.window/);
+  await bad("film: { intro: fireworks }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /film.intro must be logo or none/);
+  await bad("film: { slug: Bad Name }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /film.slug/);
+  await bad("film: { music: on }\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /film has no "music"/);
   await bad("tempo: fast\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n", /unknown key "tempo"/);
 });
 
 test("capture and sound options carry through to the recording", async () => {
-  const play = await load(`capture: { fps: 30, scale: 3 }\nsfx: true\nsetup: [{ hud: on }]\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n`);
-  assert.deepEqual(play.capture, { fps: 30, scale: 3 });
+  const play = await load(`capture: { fps: 30, scale: 3, window: [1680, 1000] }\nfilm: { intro: none, camera: still, slug: tabs, poster: 18 }\nsushi: gemini\nsfx: true\nsetup: [{ hud: on }]\nscenes:\n  - name: a\n    steps: [{ say: hi }]\n`);
+  assert.deepEqual(play.capture, { fps: 30, scale: 3, width: 1680, height: 1000 });
+  assert.deepEqual(play.film, { intro: "none", camera: "still", slug: "tabs", poster: 18 });
+  assert.equal(play.scenario.geminiKey, true);
+  assert.equal(play.scenario.liveProvider, false);
   assert.equal(play.sfx, true);
   const s = stage(); await play.scenario.prepare(s);
   assert.deepEqual(s.log, ["hud"]);

@@ -68,15 +68,47 @@ function soundsOf(beats, { pieces, when }, logo) {
   return sounds;
 }
 
-export function planFilm(take, edits, { logo = 2.6 } = {}) {
+/** The film's picture: 1920 wide, as tall as the recorded window's shape needs, in whole even pixels. */
+export function filmSize(window = { width: 1280, height: 720 }) {
+  return { width: 1920, height: 2 * Math.round((1920 * window.height) / window.width / 2) };
+}
+
+/**
+ * How a screenplay asks to be filmed. `intro: none` drops the logo,
+ * `outro: none` the closing fade, and `camera: still` holds the whole window.
+ */
+export function filmOptions(film = {}) {
+  return { logo: film.intro === "none" ? 0 : 2.6, outro: film.outro !== "none", camera: film.camera ?? "auto" };
+}
+
+/**
+ * Waits for a model, shortened to a second either side so the answer still
+ * visibly arrives. A speed edit over a wait keeps it: the author asked to
+ * see that stretch in a particular way.
+ */
+export function waitCuts(beats, edits) {
+  const cuts = [];
+  beats.forEach((beat, index) => {
+    if (beat.type !== "wait-start") return;
+    const end = beats.slice(index + 1).find((other) => other.type === "wait-end");
+    if (!end || end.t - beat.t <= 2.6) return;
+    const from = beat.t + 1, to = end.t - 1;
+    if (edits.some((edit) => edit.kind === "speed" && edit.from < to && from < edit.to)) return;
+    cuts.push({ kind: "cut", from, to, wait: true });
+  });
+  return cuts;
+}
+
+export function planFilm(take, authored, { logo = 2.6, outro = true, camera = "auto", recordedEdits = authored.recordedEdits ?? true } = {}) {
   const begin = take.beats.find((beat) => beat.type === "start")?.t;
   const end = take.beats.findLast((beat) => beat.type === "end")?.t;
   if (!Number.isFinite(begin) || !Number.isFinite(end) || end <= begin) throw new Error("Take needs a positive start/end range");
+  const edits = [...waitCuts(take.beats, authored), ...authored];
   const cut = assemble(edits, begin, end);
   const { pieces, length, when } = cut;
   if (!pieces.length) throw new Error("The edit cuts the whole take");
   const mapped = [];
-  for (const shot of reframe(direct(take.beats), edits)) {
+  for (const shot of reframe(camera === "still" || !recordedEdits ? [] : direct(take.beats), edits)) {
     const entry = { ...shot, t: logo + when(shot.t), until: logo + when(shot.t + shot.duration) };
     // Several camera changes can occur in a removed stretch. Retain its
     // final pose at the join, even when the whole movement was cut away.
@@ -87,18 +119,18 @@ export function planFilm(take, edits, { logo = 2.6 } = {}) {
     .map((shot, index, all) => ({ t: shot.t, duration: Math.min(Math.max(0.001, shot.until - shot.t), (all[index + 1]?.t ?? logo + length) - shot.t), ease: shot.ease, frame: shot.frame }));
 
   // A focus holds its caption and its mark until the next focus.
-  const focuses = take.beats.filter((beat) => beat.type === "focus" && typeof beat.caption === "string");
+  const focuses = (recordedEdits ? take.beats : []).filter((beat) => beat.type === "focus" && typeof beat.caption === "string");
   const held = focuses.map((beat, i) => ({ ...beat, from: beat.t, to: focuses[i + 1]?.t ?? end }));
   const range = { begin, end, when };
-  const captions = stretches([...held.map((beat) => ({ from: beat.from, to: beat.to, text: beat.caption, position: beat.position ?? "bottom" })), ...edits.filter((edit) => edit.kind === "caption")], range, (a, b) => a.text === b.text && a.position === b.position)
+  const captions = stretches([...held.map((beat) => ({ from: beat.from, to: beat.to, text: beat.caption, position: beat.position ?? "bottom" })), ...edits.filter((edit) => edit.kind === "caption")], range, (a, b) => a.text === b.text && a.position === b.position && JSON.stringify(a.box) === JSON.stringify(b.box))
     .filter(({ entry }) => entry.text)
-    .map(({ start, duration, entry }) => ({ start: logo + start, duration, text: entry.text, position: entry.position }));
+    .map(({ start, duration, entry }) => ({ start: logo + start, duration, text: entry.text, position: entry.position, ...(entry.box ? { box: entry.box } : {}) }));
   const keys = stretches(edits.filter((edit) => edit.kind === "keys"), range, (a, b) => a === b)
-    .map(({ start, duration, entry }) => ({ start: round(logo + start), duration: round(duration), label: entry.label, position: entry.position }));
+    .map(({ start, duration, entry }) => ({ start: round(logo + start), duration: round(duration), label: entry.label, position: entry.position, ...(entry.box ? {box:entry.box} : {}) }));
   // Highlights may overlap one another, so each keeps its own stretch.
-  const highlights = [...held.filter((beat) => beat.mark && beat.mark !== "none" && beat.box).map((beat) => ({ from: beat.from, to: beat.to, box: beat.box, style: beat.mark })), ...edits.filter((edit) => edit.kind === "highlight")]
+  const highlights = [...held.filter((beat) => beat.mark && beat.mark !== "none" && beat.box).map((beat) => ({ from: beat.from, to: beat.to, box: beat.box, style: beat.mark, space:"camera" })), ...edits.filter((edit) => edit.kind === "highlight")]
     .flatMap((entry) => stretches([entry], range, () => true))
-    .map(({ start, duration, entry }) => ({ start: round(logo + start), duration: round(duration), box: entry.box, style: entry.style }));
+    .map(({ start, duration, entry }) => ({ start: round(logo + start), duration: round(duration), box: entry.box, style: entry.style, space:entry.space??"screen" }));
   const cards = cut.cards.map((card) => ({ ...card, start: round(logo + card.start) }));
   // A retaken scene never leaves the app exactly as the old footage found it, so each join dips briefly.
   const joins = (take.joins ?? []).filter((t) => cut.kept(t) && t > begin && t < end).map((t) => ({ t, duration: 0.3 }));
@@ -107,7 +139,7 @@ export function planFilm(take, edits, { logo = 2.6 } = {}) {
     .sort((a, b) => a.t - b.t)
     // An authored transition at a join covers it already.
     .filter((dip, i, all) => !all.slice(0, i).some((other) => Math.abs(other.t - dip.t) < 0.5));
-  const film = { logo, duration: logo + length, fps: take.fps ?? 30, pieces, shots, captions, keys, highlights, cards, transitions, cursor: pointer(take.beats, cut, logo), sounds: soundsOf(take.beats, cut, logo) };
+  const film = { logo, outro, sourceAudio: !!take.audio, ...filmSize(take.window), duration: logo + length, fps: take.fps ?? 30, pieces, shots, captions, keys, highlights, cards, transitions, cursor: pointer(take.beats, cut, logo), sounds: soundsOf(take.beats, cut, logo) };
   // The overlays are drawn from the plan in one place, so the preview and the export cannot disagree.
   film.html = overlayHtml(film);
   return film;

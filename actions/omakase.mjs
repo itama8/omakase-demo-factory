@@ -11,6 +11,7 @@
 // action works at check speed.
 
 import { kitActions } from "./kit.mjs";
+import { noteActions } from "./notes.mjs";
 
 const FIND = "noteSearch";
 const FIND_OPEN = `!document.getElementById('${FIND}').classList.contains('hidden')`;
@@ -42,6 +43,7 @@ const quote = (value) => JSON.stringify(value);
 
 export const actions = {
   ...kitActions,
+  ...noteActions,
   pause: {
     summary: "Hold still. Rhythm only: nothing may depend on it.",
     args: { value: { type: "duration", required: true, doc: "how long, such as 800ms or 1.2s" } },

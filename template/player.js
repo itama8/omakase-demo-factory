@@ -72,6 +72,28 @@ if (new URLSearchParams(location.search).has("review")) {
       });
     });
     old.slice(film.pieces.length).forEach((el) => el.remove());
+    const oldAudio = [...document.querySelectorAll(".original-audio")];
+    if (film.sourceAudio)
+      film.pieces.forEach((piece, i) => {
+        const el = oldAudio[i] ?? document.createElement("audio");
+        if (!oldAudio[i]) {
+          el.src = "assets/original.m4a";
+          el.className = "original-audio";
+          root.append(el);
+        }
+        el.id = `original-${i}`;
+        Object.assign(el.dataset, {
+          start: film.logo + piece.at,
+          duration: (piece.b - piece.a) / piece.rate,
+          mediaStart: piece.a,
+          playbackRate: piece.rate,
+          trackIndex: 5,
+          volume: 1,
+        });
+      });
+    oldAudio
+      .slice(film.sourceAudio ? film.pieces.length : 0)
+      .forEach((el) => el.remove());
     // The server draws the overlays from the plan, as it does for export.
     document.getElementById("marks").innerHTML = film.html.camera;
     document.getElementById("overlays").innerHTML = film.html.screen;
@@ -86,8 +108,41 @@ if (new URLSearchParams(location.search).has("review")) {
     media = [...document.querySelectorAll("video, audio")];
     clips = [...document.querySelectorAll("[data-start][data-track-index]")];
   }
-  function seek(t, playing, sound) {
+  function seek(t, playing, sound, inspection) {
     window.__timelines.main.pause().seek(t, false);
+    const effects = !playing && inspection?.effects;
+    if (effects?.camera) {
+      const f =
+        effects.camera.camera === "wide"
+          ? { on: [0.5, 0.5], zoom: 1 }
+          : effects.camera.camera;
+      const w = Number(root.dataset.width),
+        h = Number(root.dataset.height),
+        z = f.zoom;
+      gsap.set("#camera", {
+        scale: z,
+        x: Math.max(w - w * z, Math.min(0, w / 2 - f.on[0] * w * z)),
+        y: Math.max(h - h * z, Math.min(0, h / 2 - f.on[1] * h * z)),
+      });
+    }
+    const show = (kind, entries, match) => {
+      const i = entries.findIndex(
+        (e) => e.start <= t && t < e.start + e.duration && match(e),
+      );
+      if (i >= 0) gsap.set(`#${kind}-${i}`, { opacity: 1, scale: 1, y: 0 });
+    };
+    if (effects?.caption)
+      show(
+        "caption",
+        window.__film.captions,
+        (c) => c.text === effects.caption.caption,
+      );
+    if (effects?.keys)
+      show("keys", window.__film.keys, (k) => k.label === effects.keys.keys);
+    if (effects?.highlight)
+      show("highlight", window.__film.highlights, () => true);
+    if (effects?.card && inspection.kind === "card")
+      show("card", window.__film.cards, (c) => c.text === effects.card.card);
     // Report the rendered pose, including easing between automatic shots.
     // Reading the next shot's target would disagree with the visible crop.
     const zoom = Number(gsap.getProperty("#camera", "scaleX"));
@@ -121,10 +176,12 @@ if (new URLSearchParams(location.search).has("review")) {
       const at =
         Number(el.dataset.mediaStart ?? 0) + Math.max(0, t - start) * rate;
       el.playbackRate = rate;
-      el.muted = el.tagName === "VIDEO" || !sound || el.dataset.stale === "true";
+      el.muted =
+        el.tagName === "VIDEO" || !sound || el.dataset.stale === "true";
       if (el.tagName === "AUDIO") {
         // Only the music fades out with the film.
-        const fade = el.id === "music" ? Math.min(1, Math.max(0, (end - t) / 1.4)) : 1;
+        const fade =
+          el.id === "music" ? Math.min(1, Math.max(0, (end - t) / 1.4)) : 1;
         el.volume = Number(el.dataset.volume ?? 1) * fade;
       }
       if (active && Math.abs(el.currentTime - at) > (playing ? 0.2 : 0.015))
@@ -158,7 +215,20 @@ if (new URLSearchParams(location.search).has("review")) {
         Math.min(window.__film.duration, Math.max(0, t)),
         !!event.data.playing,
         !!event.data.sound,
+        event.data.inspection,
       );
+  });
+  addEventListener("keydown", (event) => {
+    if (
+      event.code === "Space" &&
+      !event.repeat &&
+      !event.target.closest(
+        "input,textarea,select,button,a,[contenteditable=true]",
+      )
+    ) {
+      event.preventDefault();
+      parent.postMessage({ type: "demo-toggle-play" }, location.origin);
+    }
   });
   try {
     seek(0, false, false);

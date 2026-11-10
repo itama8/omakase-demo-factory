@@ -42,8 +42,10 @@ function readArgs(action, name, step, where) {
 function compileSteps(steps, { actions, where, scene, setup, dir }) {
   if (!Array.isArray(steps)) throw new Error(`${where} must be a list of steps`);
   const seen = new Map();
-  return steps.map((step, index) => {
+  return steps.map((raw, index) => {
     const at = `${where}, step ${index + 1}`;
+    // An action that needs no value can be named on its own: "- citation".
+    const step = typeof raw === "string" && raw in actions ? { [raw]: null } : raw;
     if (!step || typeof step !== "object" || Array.isArray(step)) throw new Error(`${at} must be a mapping such as "- pause: 1s"`);
     const name = Object.keys(step).find((key) => key === "custom" || key in actions);
     if (!name) throw new Error(`${at}: no known action in {${Object.keys(step).join(", ")}}. Known: ${Object.keys(actions).join(", ")}, custom`);
@@ -79,7 +81,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   const dir = path.dirname(file);
   const doc = parse(await readFile(file, "utf8"));
   if (!doc || typeof doc !== "object") throw new Error(`${file} is empty`);
-  const known = new Set(["title", "vault", "music", "seed", "sushi", "appearance", "capture", "sfx", "setup", "scenes"]);
+  const known = new Set(["title", "vault", "music", "seed", "sushi", "appearance", "capture", "sfx", "film", "setup", "scenes"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) throw new Error(`${file}: unknown key "${key}". Known: ${[...known].join(", ")}`);
   if (!Array.isArray(doc.scenes) || !doc.scenes.length) throw new Error(`${file}: needs at least one scene`);
 
@@ -95,7 +97,19 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   // "capture: { fps: 60, scale: 2 }" sets how the take is filmed. The window
   // is 1280x720; scale 3 records it at 3840x2160, which stays sharp to a 2x zoom.
   const capture = doc.capture ?? {};
-  if (typeof capture !== "object" || Array.isArray(capture) || Object.keys(capture).some((key) => !["fps", "scale"].includes(key))) throw new Error(`${file}: capture takes fps and scale`);
+  if (typeof capture !== "object" || Array.isArray(capture) || Object.keys(capture).some((key) => !["fps", "scale", "window"].includes(key))) throw new Error(`${file}: capture takes fps, scale and window`);
+  const window = capture.window ?? [1280, 720];
+  if (!Array.isArray(window) || window.length !== 2 || !window.every((n) => Number.isInteger(n) && n >= 640 && n <= 2560)) throw new Error(`${file}: capture.window must be [width, height] in pixels, each between 640 and 2560`);
+  // The film, separate from the take: what goes around it and how the camera behaves.
+  const film = doc.film ?? {};
+  const FILM = { intro: ["logo", "none"], outro: ["fade", "none"], camera: ["auto", "still"] };
+  if (typeof film !== "object" || Array.isArray(film)) throw new Error(`${file}: film takes intro, outro, camera, slug and poster`);
+  for (const [key, value] of Object.entries(film)) {
+    if (FILM[key] && !FILM[key].includes(value)) throw new Error(`${file}: film.${key} must be ${FILM[key].join(" or ")}`);
+    if (key === "slug" && !/^[a-z0-9][a-z0-9-]*$/.test(String(value))) throw new Error(`${file}: film.slug names output files; use lowercase letters, digits and dashes`);
+    if (key === "poster" && !(typeof value === "number" && value >= 0)) throw new Error(`${file}: film.poster is the poster frame's time in seconds`);
+    if (!FILM[key] && !["slug", "poster"].includes(key)) throw new Error(`${file}: film has no "${key}". It takes intro, outro, camera, slug and poster`);
+  }
   if (capture.fps !== undefined && ![24, 25, 30, 50, 60].includes(capture.fps)) throw new Error(`${file}: capture.fps must be 24, 25, 30, 50 or 60`);
   if (capture.scale !== undefined && ![1, 1.5, 2, 3].includes(capture.scale)) throw new Error(`${file}: capture.scale must be 1, 1.5, 2 or 3`);
   if (doc.sfx !== undefined && typeof doc.sfx !== "boolean") throw new Error(`${file}: sfx must be true or false`);
@@ -104,7 +118,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   // runs before launch. The same module is what `custom` steps import.
   let sushi = null;
   if (doc.appearance && (typeof doc.appearance !== "object" || Array.isArray(doc.appearance) || Object.entries(doc.appearance).some(([key, value]) => !["theme", "font"].includes(key) || typeof value !== "string"))) throw new Error(`${file}: appearance takes theme and font strings`);
-  if (doc.sushi && doc.sushi !== "live") {
+  if (doc.sushi && doc.sushi !== "live" && doc.sushi !== "gemini") {
     sushi = await import(pathToFileURL(path.resolve(dir, String(doc.sushi))).href);
     if (typeof sushi.respond !== "function") throw new Error(`${file}: ${doc.sushi} must export respond(request, helpers)`);
   }
@@ -114,7 +128,8 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
     title: doc.title ?? name,
     music: doc.music ? path.resolve(omakaseRoot, doc.music) : null,
     seed: doc.seed ?? 7,
-    capture: { fps: capture.fps ?? 60, scale: capture.scale ?? 2 },
+    capture: { fps: capture.fps ?? 60, scale: capture.scale ?? 2, width: window[0], height: window[1] },
+    film,
     sfx: doc.sfx ?? false,
     scenes: scenes.map((scene) => scene.name),
     spans: scenes.flatMap((scene) => [scene.name, ...scene.steps.map((step) => step.id)]),
@@ -123,6 +138,8 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
       dir,
       appearance: doc.appearance,
       liveProvider: doc.sushi === "live",
+      // "sushi: gemini" signs the throwaway profile in with a Gemini key from the environment.
+      geminiKey: doc.sushi === "gemini",
       voiceFixture: [...setup, ...scenes.flatMap((scene) => scene.steps)].some((step) => step.name === "dictation"),
       vault: path.resolve(omakaseRoot, doc.vault ?? app.defaultVault),
       sushi,

@@ -20,7 +20,7 @@ test("a card holds the film without consuming footage, and later times move past
   const edits = compileEdit({ edits: [{ card: "Hello", subtitle: "Sub", at: "b@start", for: "2s" }] }, take.beats);
   const { pieces, cards, length, when } = assemble(edits, 0, 10);
   assert.deepEqual(pieces.map(({ a, b, at }) => [a, b, at]), [[0, 5, 0], [5, 10, 7]]);
-  assert.deepEqual(cards, [{ start: 5, duration: 2, text: "Hello", subtitle: "Sub" }]);
+  assert.deepEqual(cards, [{ start: 5, source: 5, duration: 2, text: "Hello", subtitle: "Sub" }]);
   assert.equal(length, 12);
   assert.equal(when(6), 8);
 });

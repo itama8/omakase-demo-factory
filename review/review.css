@@ -96,7 +96,10 @@ main {
 }
 .screen {
   min-width: 0;
-  --preview-width: min(100%, calc((100svh - 260px) * 16 / 9));
+  --preview-width: min(
+    100%,
+    calc((100svh - 260px) * var(--film-aspect, 16 / 9))
+  );
 }
 .eyebrow {
   font-size: 10px;
@@ -144,7 +147,7 @@ p {
 .picture {
   position: relative;
   width: 100%;
-  aspect-ratio: 16/9;
+  aspect-ratio: var(--film-aspect, 16/9);
 }
 .picture iframe {
   position: absolute;
@@ -231,72 +234,6 @@ input[type="checkbox"] {
 }
 #edit-status.error {
   color: #ffc1ab;
-}
-#editor > label:first-child {
-  margin-bottom: 10px;
-}
-#editor fieldset {
-  margin: 12px 0;
-  padding: 12px;
-}
-#editor fieldset label:last-child {
-  margin-bottom: 0;
-}
-#editor textarea {
-  margin-bottom: 10px;
-}
-#auto-camera {
-  padding: 5px 9px;
-  font-size: 12px;
-}
-#camera-grid {
-  position: relative;
-  aspect-ratio: 16/9;
-  width: 100%;
-  margin: 8px 0 12px;
-  border: 1px solid var(--line);
-  border-radius: 5px;
-  overflow: hidden;
-  background-color: #0a2028;
-  background-image:
-    linear-gradient(to right, #55727855 1px, transparent 1px),
-    linear-gradient(to bottom, #55727855 1px, transparent 1px);
-  background-size: 25% 33.3333%;
-  touch-action: none;
-  cursor: crosshair;
-}
-#camera-window {
-  position: absolute;
-  min-width: 0;
-  padding: 0;
-  border: 2px solid var(--accent);
-  border-radius: 3px;
-  background: #bfe7d21a;
-  box-shadow: 0 0 0 500px #0005;
-  cursor: grab;
-  touch-action: none;
-}
-#camera-window::after {
-  content: "+";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  color: var(--accent);
-  font:
-    16px/1 system-ui,
-    sans-serif;
-}
-#camera-grid.dragging,
-#camera-grid.dragging #camera-window {
-  cursor: grabbing;
-}
-#camera-grid[aria-disabled="true"],
-#camera-window:disabled {
-  cursor: default;
-}
-#camera-window:disabled {
-  opacity: 0.55;
 }
 aside {
   border-left: 1px solid var(--line);
@@ -415,35 +352,12 @@ textarea {
   overflow: hidden;
   background: #122c34;
 }
-#steps .timeline-block {
-  background: #0a2028;
-  color: var(--muted);
-}
 .timeline-block.is-selected {
   border-color: var(--accent);
 }
-.timeline-block.is-current,
-#steps .timeline-block.is-current {
+.timeline-block.is-current {
   background: #254d4b;
   color: var(--ink);
-}
-.timeline-marker {
-  position: absolute;
-  z-index: 3;
-  top: 0;
-  width: 10px;
-  height: 100%;
-  padding: 0;
-  transform: translateX(-50%);
-  border: 0;
-  border-radius: 2px;
-  background: #5c827d;
-  color: #fff;
-  font-size: 20px;
-}
-.timeline-marker:hover {
-  background: var(--accent);
-  color: var(--bg);
 }
 #playhead {
   position: absolute;
@@ -465,39 +379,6 @@ textarea {
   pointer-events: auto;
   cursor: ew-resize;
   touch-action: none;
-}
-#timeline-menu {
-  position: absolute;
-  bottom: 0;
-  z-index: 6;
-  min-width: 180px;
-  max-width: 100%;
-  padding: 6px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--panel);
-  box-shadow: 0 6px 24px #0009;
-}
-#timeline-menu button {
-  display: block;
-  width: 100%;
-  text-align: left;
-  padding: 7px 10px;
-  border: 0;
-  font-size: 12px;
-}
-#edits {
-  padding-left: 18px;
-  font-size: 12px;
-}
-#edits li {
-  padding: 6px 0;
-  overflow-wrap: anywhere;
-}
-#edits button {
-  padding: 2px 7px;
-  margin-left: 8px;
-  font-size: 11px;
 }
 details {
   margin-top: 24px;
@@ -556,4 +437,363 @@ header label.inline select {
 }
 header label.inline[hidden] {
   display: none;
+}
+
+/* Range cards: controls appear only for effects the editor adds. */
+header .toolbar {
+  align-items: flex-end;
+}
+header .toolbar > button,
+header .toolbar > a,
+header .toolbar select {
+  height: 38px;
+  min-height: 38px;
+  margin: 0;
+}
+header .toolbar > a {
+  display: inline-flex;
+  align-items: center;
+}
+header label.inline {
+  align-items: flex-start;
+  gap: 5px;
+}
+header label.inline select {
+  min-width: 90px;
+}
+main {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 28px;
+}
+aside {
+  padding-left: 24px;
+  min-width: 0;
+}
+aside .section-heading {
+  margin: 0 0 12px;
+  align-items: center;
+}
+aside h2 {
+  font:
+    20px Georgia,
+    serif;
+}
+#add-edit {
+  font-size: 12px;
+  padding: 8px 10px;
+}
+.save-row button {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  padding: 6px;
+  font-size: 12px;
+}
+.empty-state {
+  font-size: 13px;
+  color: var(--muted);
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  padding: 24px 18px;
+  text-align: center;
+}
+#edit-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.edit-card {
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: #091c22;
+}
+.edit-card.is-active {
+  border-color: #729f93;
+}
+.edit-card > summary {
+  padding: 13px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.card-summary-text {
+  margin-left: 4px;
+}
+.card-time {
+  display: block;
+  padding: 5px 0 0 19px;
+  color: var(--muted);
+  font:
+    11px ui-monospace,
+    monospace;
+}
+.edit-card-body {
+  padding: 0 12px 12px;
+}
+.range-inputs {
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  gap: 8px;
+}
+.range-inputs label {
+  margin-top: 10px;
+}
+.edit-card fieldset {
+  position: relative;
+  margin: 10px 0 14px;
+  padding: 12px;
+}
+.edit-card legend {
+  padding-right: 18px;
+}
+.edit-card .remove-effect {
+  position: absolute;
+  top: -16px;
+  right: 7px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  font-size: 18px;
+  border: 0;
+  background: var(--bg);
+  color: var(--muted);
+}
+.edit-card textarea {
+  margin: 0;
+  min-height: 64px;
+}
+.card-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 14px;
+}
+.card-actions button,
+.place-button {
+  font-size: 11px;
+  padding: 6px 8px;
+}
+.delete-edit {
+  color: #ffc1ab;
+}
+#timeline {
+  touch-action: none;
+}
+.timeline-row {
+  height: 30px;
+}
+#range-selection {
+  position: absolute;
+  top: 19px;
+  bottom: 0;
+  border: 2px solid var(--accent);
+  background: #bfe7d226;
+  pointer-events: none;
+  z-index: 4;
+}
+.range-handle {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 10px;
+  pointer-events: auto;
+  cursor: ew-resize;
+  background: var(--accent);
+  border-radius: 2px;
+  touch-action: none;
+}
+.range-handle.start {
+  left: -5px;
+}
+.range-handle.end {
+  right: -5px;
+}
+#placement-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 8;
+}
+#placement-box {
+  position: absolute;
+  border: 2px dashed var(--accent);
+  border-radius: 5px;
+  background: #bfe7d20a;
+  pointer-events: auto;
+  cursor: grab;
+  touch-action: none;
+  box-sizing: border-box;
+}
+#placement-box:active {
+  cursor: grabbing;
+}
+#placement-label {
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  padding: 3px 6px;
+  border-radius: 3px 3px 0 0;
+  background: var(--accent);
+  color: var(--bg);
+  font:
+    11px system-ui,
+    sans-serif;
+  max-width: 240px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.resize-handle {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--bg);
+  border-radius: 3px;
+  background: var(--accent);
+  cursor: nwse-resize;
+}
+.camera-grid {
+  position: relative;
+  aspect-ratio: var(--film-aspect, 16 / 9);
+  margin: 8px 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 32%,
+      #55727855 33%,
+      transparent 34%
+    ),
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 24%,
+      #55727855 25%,
+      transparent 26%
+    );
+  touch-action: none;
+}
+.camera-window {
+  position: absolute;
+  padding: 0;
+  border: 2px solid var(--accent);
+  border-radius: 3px;
+  background: #bfe7d21a;
+  box-shadow: 0 0 0 500px #0005;
+  cursor: grab;
+  touch-action: none;
+}
+@media (max-width: 1000px) {
+  main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  aside {
+    padding-left: 0;
+  }
+}
+@media (max-width: 620px) {
+  header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  header .toolbar {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  header .toolbar select {
+    max-width: 180px;
+  }
+}
+
+@media (min-width: 1001px) {
+  aside {
+    align-self: start;
+    max-height: calc(100svh - 112px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+  }
+}
+
+/* Persistent edit windows have independent thin borders and wide hit areas. */
+#edit-ranges {
+  position: relative;
+  min-height: 25px;
+  margin-top: 5px;
+  touch-action: none;
+}
+.edit-window {
+  position: absolute;
+  min-width: 3px;
+  height: 22px;
+  box-sizing: border-box;
+  border: 1px solid #7caaa080;
+  border-radius: 3px;
+  background: #bfe7d20d;
+  cursor: grab;
+  touch-action: none;
+  font-size: 10px;
+  color: var(--muted);
+}
+.edit-window.is-active {
+  border-color: var(--accent);
+  background: #bfe7d21c;
+  color: var(--ink);
+}
+.edit-window:active {
+  cursor: grabbing;
+}
+.window-label {
+  display: block;
+  padding: 3px 7px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.range-handle {
+  width: 10px;
+  border: 0;
+  background: transparent;
+  top: -1px;
+  bottom: -1px;
+}
+.range-handle::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--accent);
+}
+#range-selection {
+  border-width: 1px;
+  height: 30px;
+  bottom: auto;
+}
+.edit-toolbar {
+  display: flex;
+  margin: 0 0 8px;
+}
+.edit-toolbar svg {
+  fill: none;
+}
+#edit-status:empty {
+  display: none;
+}
+#placement-box {
+  border-width: 1px;
+  background: transparent;
+}
+#placement-label {
+  font-size: 10px;
+  padding: 2px 4px;
 }

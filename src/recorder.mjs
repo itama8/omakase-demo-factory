@@ -4,7 +4,8 @@
 // has to describe where things are. Nothing here knows what Omakase's UI
 // looks like; that knowledge lives in the action vocabulary.
 import { spawn, spawnSync } from "node:child_process";
-import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -44,15 +45,47 @@ function mulberry32(seed) {
   };
 }
 
-function startDisplay(width, height) {
+/**
+ * A display number nothing on this machine uses: no lock file, no socket
+ * file, and no abstract socket. Starting high keeps clear of the desktop's
+ * own X server and of the displays XWayland hands out. Letting Xvfb choose
+ * is not safe: given a stale lock it will take over :0, the desktop's
+ * display, and remove the desktop's socket when it exits.
+ */
+export async function freeDisplay(from = 90, to = 400) {
+  const abstract = new Set((await readFile("/proc/net/unix", "utf8").catch(() => "")).split("\n").map((line) => line.trim().split(/\s+/).at(-1)).filter((name) => name?.startsWith("@/tmp/.X11-unix/X")));
+  for (let n = from; n < to; n++) {
+    if (existsSync(`/tmp/.X${n}-lock`) || existsSync(`/tmp/.X11-unix/X${n}`) || abstract.has(`@/tmp/.X11-unix/X${n}`)) continue;
+    return n;
+  }
+  throw new Error(`no free X display between :${from} and :${to}`);
+}
+
+async function startDisplay(width, height) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const number = await freeDisplay(90 + attempt * 7);
+    try { return await openDisplay(number, width, height); }
+    // Another process can take the same number between the check and the start; try the next.
+    catch (error) { if (!/already active|Cannot establish|server already running/i.test(error.message)) throw error; }
+  }
+  throw new Error("could not start a private X display");
+}
+
+function openDisplay(number, width, height) {
   return new Promise((resolve, reject) => {
-    // -displayfd makes Xvfb pick a free display and report its number.
-    const server = spawn("Xvfb", ["-displayfd", "3", "-screen", "0", `${width}x${height}x24`, "-noreset", "-nocursor"], { stdio: ["ignore", "ignore", "pipe", "pipe"] });
-    let errors = "";
+    // -nolisten tcp: reachable only from this machine. The take never touches the desktop's display.
+    const server = spawn("Xvfb", [`:${number}`, "-screen", "0", `${width}x${height}x24`, "-noreset", "-nocursor", "-nolisten", "tcp"], { stdio: ["ignore", "ignore", "pipe"] });
+    let errors = "", ready = false, poll;
     server.stderr.on("data", (chunk) => { errors += chunk; });
-    server.once("error", reject);
-    server.once("exit", (code) => reject(new Error(`Xvfb exited early (code ${code}): ${errors.trim()}`)));
-    server.stdio[3].once("data", (chunk) => resolve({ display: `:${String(chunk).trim()}`, stop: () => server.kill("SIGTERM") }));
+    server.once("error", (error) => { clearInterval(poll); reject(error); });
+    server.once("exit", (code) => { clearInterval(poll); if (!ready) reject(new Error(`Xvfb :${number} exited early (code ${code}): ${errors.trim()}`)); });
+    const started = Date.now();
+    poll = setInterval(() => {
+      if (existsSync(`/tmp/.X11-unix/X${number}`)) {
+        clearInterval(poll); ready = true;
+        resolve({ display: `:${number}`, stop: () => server.kill("SIGTERM") });
+      } else if (Date.now() - started > 10_000) { clearInterval(poll); server.kill("SIGKILL"); reject(new Error(`Xvfb :${number} did not start: ${errors.trim()}`)); }
+    }, 50);
   });
 }
 
@@ -84,6 +117,45 @@ function startRecording({ display, width, height, fps, file }) {
     });
     exited.then((code) => { if (!done) reject(new Error(`ffmpeg stopped before recording (code ${code}):\n${log}`)); });
   });
+}
+
+// A session bus of the take's own. The app's keyring, file pickers and
+// notifications go over the session bus; on the desktop's bus they would
+// prompt or open windows on the live screen. This bus can start nothing.
+const PRIVATE_BUS = `<!DOCTYPE busconfig PUBLIC "-//freedesktop//DTD D-Bus Bus Configuration 1.0//EN" "http://www.freedesktop.org/standards/dbus/1.0/busconfig.dtd">
+<busconfig><type>session</type><listen>unix:tmpdir=${os.tmpdir()}</listen><auth>EXTERNAL</auth>
+<policy context="default"><allow send_destination="*" eavesdrop="true"/><allow eavesdrop="true"/><allow own="*"/></policy></busconfig>`;
+
+async function startBus() {
+  const config = path.join(os.tmpdir(), `omakase-demo-bus-${process.pid}.conf`);
+  await writeFile(config, PRIVATE_BUS);
+  return new Promise((resolve, reject) => {
+    const env = { PATH: process.env.PATH, HOME: process.env.HOME };
+    const bus = spawn("dbus-daemon", [`--config-file=${config}`, "--nofork", "--print-address=3"], { env, stdio: ["ignore", "ignore", "pipe", "pipe"] });
+    let errors = "";
+    bus.stderr.on("data", (chunk) => { errors += chunk; });
+    bus.once("error", (error) => reject(error.code === "ENOENT" ? new Error("dbus-daemon is needed to keep the app off the desktop's session bus") : error));
+    bus.once("exit", (code) => reject(new Error(`dbus-daemon exited early (code ${code}): ${errors.trim()}`)));
+    bus.stdio[3].once("data", (chunk) => resolve({ address: String(chunk).trim(), stop: async () => { bus.kill("SIGTERM"); await rm(config, { force: true }); } }));
+  });
+}
+
+/** Strip a secret from anything that might be printed. */
+const redact = (text, secret) => secret ? String(text).split(secret).join("***") : String(text);
+
+/** Sign the throwaway profile in to Gemini with a key from the environment, and choose a fast model. */
+async function signInGemini(app) {
+  const key = process.env.GEMINI_API_KEY ?? process.env.OMK_KEY;
+  if (!key) throw new Error("sushi: gemini needs a Gemini API key in GEMINI_API_KEY (or OMK_KEY)");
+  try {
+    const set = await app.evaluate(`window.omakase.setProviderApiKey({ providerId: "google", apiKey: ${JSON.stringify(key)} }).then((r) => ({ ok: r.ok, error: r.error ?? null }))`);
+    if (!set.ok) throw new Error(`Gemini refused the key: ${set.error ?? "no reason given"}`);
+    const ids = await app.evaluate(`window.omakase.listSushiModels().then((all) => all.filter((m) => (m.providerId ?? m.provider) === "google").map((m) => m.modelId ?? m.id))`);
+    const model = ["gemini-3.5-flash", "gemini-3-flash", "gemini-3.1-flash-lite", "gemini-2.5-flash"].find((id) => ids.includes(id)) ?? ids.find((id) => /flash/.test(id));
+    if (!model) throw new Error(`no Gemini flash model is available; the key offers: ${ids.join(", ") || "nothing"}`);
+    await app.evaluate(`window.omakase.setSushiModel({ providerId: "google", modelId: ${JSON.stringify(model)} }).then(() => true)`);
+    console.log(`  Sushi: Gemini ${model} (live; answers vary between takes)`);
+  } catch (error) { throw new Error(redact(error.message, key)); }
 }
 
 async function seedVault(source, vault) {
@@ -133,10 +205,15 @@ export function capturedRate(file) {
  * with the camera off, so the app is in the state that scene starts from.
  */
 export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, height = 720, scale = 2, fps = 60, seed = 7, record = true, pace: wanted = 1, only = null }) {
+  if (scenario.geminiKey && !(process.env.GEMINI_API_KEY ?? process.env.OMK_KEY)) throw new Error("sushi: gemini needs a Gemini API key in GEMINI_API_KEY (or OMK_KEY)");
+  // Under the check runner the display is already private; never use the desktop's.
+  if (process.env.OMAKASE_CHECK === "1" && !record && (width > 1280 || height > 1024)) scale = 1;
   // The lead-in to a single scene runs at check speed; the pace returns when the camera rolls.
   let pace = only ? 0 : wanted;
   // The app session resolves dist/ and electron from the working directory.
-  process.chdir(omakaseRoot);
+  const originalCwd = process.cwd();
+  const environmentKeys = ["DISPLAY", "WAYLAND_DISPLAY", "XDG_SESSION_TYPE", "ELECTRON_OZONE_PLATFORM_HINT", "GDK_SCALE", "GTK_USE_PORTAL", "DBUS_SESSION_BUS_ADDRESS"];
+  const environment = Object.fromEntries(environmentKeys.map((key) => [key, process.env[key]]));
   const { launchApp, electronExpression, editorReady } = await import(pathToFileURL(path.join(omakaseRoot, "scripts/app-session.mjs")).href);
   if (record) await mkdir(outDir, { recursive: true });
   // Checks rebuild dist/ under this lock. Holding it keeps a build from
@@ -145,19 +222,24 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     .acquireLock(process.env.OMAKASE_CHECK_LOCK ?? path.join(os.tmpdir(), "omakase-check", `lock-${omakaseRoot.replace(/[^\w.-]+/g, "_")}`));
   const pixels = { width: width * scale, height: height * scale };
   // Under `npm run check` the runner already owns an isolated display.
-  const screen = process.env.OMAKASE_CHECK === "1" && !record ? { display: process.env.DISPLAY, stop() {} } : await startDisplay(pixels.width, pixels.height);
-  // Electron prefers Wayland whenever WAYLAND_DISPLAY is set, which would put
-  // the window on the live desktop instead of the recorded one.
-  delete process.env.WAYLAND_DISPLAY;
-  Object.assign(process.env, { DISPLAY: screen.display, XDG_SESSION_TYPE: "x11", ELECTRON_OZONE_PLATFORM_HINT: "x11", GDK_SCALE: "1" });
-  // A human delay, scaled by the pace. Waits on the app are never scaled.
-  const rest = (ms) => pace > 0 ? delay(ms * pace) : undefined;
-
-  const random = mulberry32(seed);
+  let screen, bus;
   let beats = [];
   let app, recording, sushi, clock = null;
   let profilePath;
   try {
+    process.chdir(omakaseRoot);
+    screen = process.env.OMAKASE_CHECK === "1" && !record ? { display: process.env.DISPLAY, stop() {} } : await startDisplay(pixels.width, pixels.height);
+    // Electron prefers Wayland whenever WAYLAND_DISPLAY is set, which would put
+    // the window on the live desktop instead of the recorded one.
+    delete process.env.WAYLAND_DISPLAY;
+    Object.assign(process.env, { DISPLAY: screen.display, XDG_SESSION_TYPE: "x11", ELECTRON_OZONE_PLATFORM_HINT: "x11", GDK_SCALE: "1", GTK_USE_PORTAL: "0" });
+    // "sushi: live" decrypts a key saved with the desktop's keyring, so it alone keeps the desktop's bus.
+    bus = scenario.liveProvider ? null : await startBus();
+    if (bus) process.env.DBUS_SESSION_BUS_ADDRESS = bus.address;
+    // A human delay, scaled by the pace. Waits on the app are never scaled.
+    const rest = (ms) => pace > 0 ? delay(ms * pace) : undefined;
+
+    const random = mulberry32(seed);
     // Sushi scenes answer from a scripted local model server instead of a
     // real provider: the demo profile has no credentials. The real runtime
     // still runs every tool the script calls.
@@ -167,7 +249,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
       sushi.server = await startFakeModelProvider((request, count) => scenario.sushi.respond(request, { count, pace, rest: (ms) => rest(ms) ?? Promise.resolve() }));
     }
     app = await launchApp({
-      prefix: "omakase-demo-", main: true, args: [`--force-device-scale-factor=${scale}`],
+      prefix: "omakase-demo-", main: true, args: ["--ozone-platform=x11", `--force-device-scale-factor=${scale}`, ...(bus ? ["--password-store=basic"] : [])],
       env: scenario.voiceFixture ? { OMAKASE_VOICE_USE_FIXTURE: "1" } : {},
       setup: async (profile) => {
         profilePath = profile;
@@ -190,6 +272,9 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
       }
     });
     await app.evaluateMain(`${electronExpression}.BrowserWindow.getAllWindows()[0].setBounds({ x: 0, y: 0, width: ${width}, height: ${height} }), true`);
+    // A link the take follows must not open the desktop's browser or file manager.
+    await app.evaluateMain(`(() => { const { shell } = ${electronExpression}; shell.openExternal = async (url) => { console.log("demo: kept external link inside the take: " + url); }; shell.openPath = async () => ""; shell.showItemInFolder = () => {}; return true; })()`);
+    if (scenario.geminiKey) await signInGemini(app);
     // A recording needs the window to cover the screen exactly. A check only
     // needs it close: X can settle a pixel short when nothing is being filmed.
     const slack = record ? 0 : 2;
@@ -282,12 +367,25 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
        * The recording has no pointer, so the two beats are what the film draws
        * one from. Use this instead of `app.click` for any click the viewer should see.
        */
-      async click(selector, options) {
+      async click(selector, { button = "left", ctrl = false, shift = false, ...options } = {}) {
         const frac = (at) => ({ x: Number((at.x / width).toFixed(4)), y: Number((at.y / height).toFixed(4)) });
         // The app's own hit test scrolls the target into view and says where the click will land.
-        if (pace > 0) { stage.beat("pointer", frac(await app.hitPoint(selector))); await rest(520); }
-        const point = await app.click(selector, options);
-        if (pace > 0 && point) stage.beat("click", frac(point));
+        // Before the camera rolls there is no pointer to draw.
+        const filmed = pace > 0 && clock !== null;
+        if (filmed) { stage.beat("pointer", frac(await app.hitPoint(selector))); await rest(520); }
+        let point;
+        if (button === "left" && !ctrl && !shift) point = await app.click(selector, options);
+        else {
+          // A held modifier is pressed on the keyboard first, so the keystroke HUD shows it.
+          // Find the point first: a held modifier can re-render the target (a link previews under Ctrl).
+          point = await app.hitPoint(selector);
+          const mods = [...(ctrl ? ["Ctrl"] : []), ...(shift ? ["Shift"] : [])];
+          for (const mod of mods) { await stage.down(mod); await rest(140); }
+          for (const type of ["mousePressed", "mouseReleased"]) await app.send("Input.dispatchMouseEvent", { type, ...point, button, clickCount: 1, modifiers: held });
+          await rest(90);
+          for (const mod of mods.reverse()) await stage.up(mod);
+        }
+        if (filmed && point) stage.beat("click", { ...frac(point), button });
         await rest(180);
       },
       /** A key combination such as "Ctrl+Shift+F", pressed the way a hand does: modifiers first. The camera goes to `watch`; pass null to leave it where it is. */
@@ -328,13 +426,23 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     if (screenshot) console.error(`Evidence: screenshot=${screenshot}`);
     throw error;
   } finally {
-    await recording?.stop();
-    await app?.close().catch((error) => console.error(`Teardown: ${error.message}`));
-    await sushi?.server?.close();
-    screen.stop();
-    lock.release();
+    try {
+      const cleanup = async (stop) => { try { await stop(); } catch (error) { console.error(`Teardown: ${error.message}`); } };
+      await cleanup(() => recording?.stop());
+      await cleanup(() => app?.close());
+      await cleanup(() => sushi?.server?.close());
+      await cleanup(() => screen?.stop());
+      await cleanup(() => bus?.stop());
+    } finally {
+      for (const [key, value] of Object.entries(environment)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      process.chdir(originalCwd);
+      lock.release();
+    }
   }
-  const take = { name: scenario.name, fps, window: { width, height, scale }, ...(only ? { only } : {}), duration: beats.at(-1)?.t ?? 0, beats };
+  const take = { name: scenario.name, fps, window: { width, height, scale }, appearance: scenario.appearance, ...(only ? { only } : {}), duration: beats.at(-1)?.t ?? 0, beats };
   if (record) {
     // A capture that cannot keep up drops frames silently. Say so, because it shows as stutter.
     const rate = capturedRate(path.join(outDir, "take.mp4"));

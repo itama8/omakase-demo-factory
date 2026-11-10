@@ -55,7 +55,7 @@ function frameOf(value, where) {
 export async function editSpans(file) {
   let doc;
   try { doc = parse(await readFile(file, "utf8")); } catch (error) { if (error.code === "ENOENT") return []; throw error; }
-  const ranges = (doc?.edits ?? []).flatMap((entry) => [entry.cut, entry.over, entry.at]).filter((value) => typeof value === "string");
+  const ranges = (doc?.edits ?? []).flatMap((entry) => [entry.cut, entry.over, entry.at, entry.review?.range]).filter((value) => typeof value === "string");
   return [...new Set(ranges.flatMap((text) => text.split("..").map((part) => part.trim().match(/^[a-z0-9-]+(?:\/[a-z0-9-]+)?/)?.[0])).filter(Boolean))];
 }
 
@@ -69,28 +69,31 @@ export async function loadEdit(file, beats) {
 const KINDS = {
   cut: [],
   speed: ["over"],
-  camera: ["over"],
-  caption: ["over", "position"],
+  camera: ["over", "for", "ease"],
+  caption: ["over", "position", "box"],
   card: ["at", "for", "subtitle"],
-  highlight: ["over", "style"],
-  keys: ["over", "position"],
+  highlight: ["over", "style", "space"],
+  keys: ["over", "position", "box"],
   transition: ["at", "for"]
 };
 
 /** Shared validation for agent-authored YAML and edits saved in the browser. */
 export function compileEdit(doc, beats, file = "edit") {
   if (doc !== null && doc !== undefined && (typeof doc !== "object" || Array.isArray(doc))) throw new Error(`${file}: expected a mapping`);
-  for (const key of Object.keys(doc ?? {})) if (key !== "edits") throw new Error(`${file}: unknown key ${key}`);
+  for (const key of Object.keys(doc ?? {})) if (!["edits","recordedEdits"].includes(key)) throw new Error(`${file}: unknown key ${key}`);
+  if(doc?.recordedEdits!==undefined&&typeof doc.recordedEdits!=='boolean')throw new Error(`${file}: recordedEdits must be a boolean`);
   const list = doc?.edits ?? [];
   if (!Array.isArray(list)) throw new Error(`${file}: "edits" must be a list`);
   const spans = spansOf(beats);
-  return list.map((entry, index) => {
+  const compiled = list.map((entry, index) => {
     const where = `${file}, edit ${index + 1}`;
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) throw new Error(`${where}: expected an edit mapping`);
     const kinds = Object.keys(KINDS).filter((key) => key in entry);
     if (kinds.length !== 1) throw new Error(`${where}: needs exactly one of ${Object.keys(KINDS).join(", ")}`);
     const [kind] = kinds;
-    for (const key of Object.keys(entry)) if (key !== kind && !KINDS[kind].includes(key)) throw new Error(`${where}: unknown argument ${key}`);
+    for (const key of Object.keys(entry)) if (key !== kind && key !== "review" && !KINDS[kind].includes(key)) throw new Error(`${where}: unknown argument ${key}`);
+    if (entry.review !== undefined && (typeof entry.review !== "object" || entry.review === null || Array.isArray(entry.review) || typeof entry.review.id !== "string" || !/^[\w-]{1,100}$/.test(entry.review.id) || Object.keys(entry.review).some((key) => !["id", "collapsed", "range"].includes(key)) || (entry.review.collapsed !== undefined && typeof entry.review.collapsed !== "boolean"))) throw new Error(`${where}: review needs an id and optional collapsed boolean`);
+    if(entry.review?.range!==undefined){if(typeof entry.review.range!=="string")throw new Error(`${where}: review range must be text`);range(entry.review.range,spans,where);}
     const position = (fallback) => {
       if (entry.position !== undefined && !["top", "bottom"].includes(entry.position)) throw new Error(`${where}: position must be top or bottom`);
       return entry.position ?? fallback;
@@ -111,8 +114,17 @@ export function compileEdit(doc, beats, file = "edit") {
       if (typeof entry.speed !== "number" || !Number.isFinite(entry.speed) || !(entry.speed >= 0.1 && entry.speed <= 10)) throw new Error(`${where}: speed must be between 0.1 and 10; got ${entry.speed}`);
       return { kind, rate: entry.speed, ...range(entry.over, spans, where) };
     }
-    if (kind === "camera") return { kind, frame: frameOf(entry.camera, where), ...range(entry.over, spans, where) };
-    if (kind === "caption") return { kind, text: text(entry.caption, "caption", 240), position: position("bottom"), ...range(entry.over, spans, where) };
+    if (kind === "camera") {
+      const duration=entry.for===undefined?.8:seconds(entry.for,`${where}: for`);
+      if(!Number.isFinite(duration)||duration<=0||duration>30)throw new Error(`${where}: zoom duration must be between 0 and 30s`);
+      if(entry.ease!==undefined&&!['none','power1.inOut','power2.inOut','power3.inOut','power4.inOut'].includes(entry.ease))throw new Error(`${where}: unsupported zoom easing`);
+      return { kind, frame: frameOf(entry.camera, where),duration,ease:entry.ease??'power3.inOut',...range(entry.over, spans, where) };
+    }
+    if (kind === "caption") {
+      const box = entry.box;
+      if (box !== undefined && (!Array.isArray(box) || box.length !== 4 || !box.every(Number.isFinite) || box[0] < 0 || box[1] < 0 || box[2] <= 0 || box[3] <= 0 || box[0] + box[2] > 1.0001 || box[1] + box[3] > 1.0001)) throw new Error(`${where}: caption box must be [x, y, width, height] within the picture`);
+      return { kind, text: text(entry.caption, "caption", 240), position: position("bottom"), ...(box ? { box } : {}), ...range(entry.over, spans, where) };
+    }
     if (kind === "card") {
       if (!entry.card) throw new Error(`${where}: a card needs its text`);
       return { kind, text: text(entry.card, "card", 80), subtitle: entry.subtitle === undefined ? "" : text(entry.subtitle, "subtitle", 160), ...moment(2.2, 10) };
@@ -121,15 +133,20 @@ export function compileEdit(doc, beats, file = "edit") {
       const box = Array.isArray(entry.highlight) && entry.highlight.length === 4 ? entry.highlight.map(Number) : null;
       if (!box || !box.every(Number.isFinite) || box[0] < 0 || box[1] < 0 || box[2] <= 0 || box[3] <= 0 || box[0] + box[2] > 1.0001 || box[1] + box[3] > 1.0001) throw new Error(`${where}: highlight must be [x, y, width, height] as fractions of the window`);
       if (entry.style !== undefined && !["ring", "spotlight"].includes(entry.style)) throw new Error(`${where}: style must be ring or spotlight`);
-      return { kind, box: { x: box[0], y: box[1], w: box[2], h: box[3] }, style: entry.style ?? "ring", ...range(entry.over, spans, where) };
+      if(entry.space!==undefined&&!['screen','camera'].includes(entry.space))throw new Error(`${where}: highlight space must be screen or camera`);
+      return { kind, box: { x: box[0], y: box[1], w: box[2], h: box[3] },space:entry.space??'screen', style: entry.style ?? "ring", ...range(entry.over, spans, where) };
     }
     if (kind === "keys") {
       if (!entry.keys) throw new Error(`${where}: keys needs a combination such as Ctrl+K`);
-      return { kind, label: text(entry.keys, "keys", 40), position: position("bottom"), ...range(entry.over, spans, where) };
+      const box=entry.box;
+      if(box!==undefined&&(!Array.isArray(box)||box.length!==4||!box.every(Number.isFinite)||box[0]<0||box[1]<0||box[2]<=0||box[3]<=0||box[0]+box[2]>1.0001||box[1]+box[3]>1.0001))throw new Error(`${where}: key box must fit inside the picture`);
+      return { kind, label: text(entry.keys, "keys", 40), position: position("bottom"),...(box?{box}:{}), ...range(entry.over, spans, where) };
     }
     if (entry.transition !== "dip") throw new Error(`${where}: transition must be dip`);
     return { kind, ...moment(0.5, 2) };
   });
+  Object.defineProperty(compiled,'recordedEdits',{value:doc?.recordedEdits!==false});
+  return compiled;
 }
 
 /**
@@ -162,7 +179,7 @@ export function assemble(edits, begin, end) {
   let cursor = 0;
   for (const entry of sequence) {
     if (entry.hold) {
-      cards.push({ start: cursor, duration: entry.hold.duration, text: entry.hold.text, subtitle: entry.hold.subtitle });
+      cards.push({ start: cursor, source:entry.hold.t, duration: entry.hold.duration, text: entry.hold.text, subtitle: entry.hold.subtitle });
       cursor += entry.hold.duration;
       continue;
     }
@@ -195,7 +212,7 @@ export function reframe(shots, edits) {
   for (const t of marks) {
     const active = cameras.findLast((edit) => edit.from <= t && t < edit.to);
     if (active) {
-      if (active !== previous) result.push({ t, duration: Math.min(0.8, active.to - t), ease: "power3.inOut", frame: active.frame });
+      if (active !== previous) result.push({ t, duration: Math.min(active.duration??0.8, active.to - t), ease: active.ease??"power3.inOut", frame: active.frame });
     } else if (previous) {
       result.push({ t, duration: 0.8, ease: "power3.inOut", frame: original.findLast((shot) => shot.t <= t)?.frame ?? WIDE });
     } else result.push(...original.filter((shot) => shot.t === t));

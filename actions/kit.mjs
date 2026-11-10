@@ -90,7 +90,9 @@ export const kitActions = {
       await stage.show("modal", "#sushiInlinePill");
       await stage.type(value, { where: () => stage.box("#sushiInlinePill") });
       await stage.stroke("Enter");
+      stage.beat("wait-start");
       await stage.until("inline completion ready", "document.body.innerText.includes('Enter to accept')", { timeoutMs: 120_000 });
+      stage.beat("wait-end");
       await stage.pause(1800);
       await stage.stroke("Enter");
       await stage.app.until("inline completion accepted", async () => { const after = await doc(stage); return after !== before && (!reads || after.includes(reads)); });
@@ -98,15 +100,22 @@ export const kitActions = {
   },
   "ask-sushi": {
     summary: "Ask Sushi at the caret and wait for the answer card. Needs scripted replies or sushi: live.",
-    args: { value: text, answer: { type: "text" } },
-    async run(stage, { value, answer }) {
+    args: { value: text, answer: { type: "text", doc: "text the answer must contain; leave it out for a live model" }, cites: { type: "enum", values: ["any", "pdf"], default: "any", doc: "pdf: the answer must cite the open PDF" } },
+    async run(stage, { value, answer, cites }) {
+      const before = await stage.app.evaluate("document.querySelectorAll('.cm-invocation-card').length");
       await prefix(stage, "d", "d");
       const input = ".selected-sushi-composer-input";
       await stage.until("Sushi composer", `document.activeElement?.classList.contains('selected-sushi-composer-input')`);
       await stage.show("modal", input);
       await stage.type(value, { where: () => stage.box(input) });
       await stage.stroke("Enter");
-      await stage.until("Sushi answer done", `${lastCard}?.dataset.phase === 'done'`, { timeoutMs: 120_000 });
+      // The film shortens what follows: the wait for a model is not worth watching.
+      stage.beat("wait-start");
+      await stage.until("Sushi answer finished", `document.querySelectorAll('.cm-invocation-card').length > ${before} && ['done', 'error', 'failed', 'cancelled'].includes(${lastCard}?.dataset.phase)`, { timeoutMs: 180_000 });
+      stage.beat("wait-end");
+      const phase = await stage.app.evaluate(`${lastCard}.dataset.phase`);
+      if (phase !== "done") throw new Error(`Sushi's answer ended as "${phase}": ${await stage.app.evaluate(`${lastCard}.innerText.slice(0, 300)`)}`);
+      if (cites === "pdf") await stage.until("the answer cites the PDF", `!!${lastCard}?.querySelector('.cm-sushi-pdf-citation-chip')`);
       if (answer) await stage.until("Sushi answer content", `${lastCard}?.textContent.includes(${q(answer)})`);
       await stage.app.evaluate(`${lastCard}.scrollIntoView({ block: 'center' }), true`);
       await stage.show("modal", ".cm-invocation-card:last-of-type");
@@ -142,6 +151,7 @@ export const kitActions = {
         await stage.until("PDF text ready", `[...document.querySelectorAll('#pdfViewerPages .pdf-viewer-text-layer span')].some(e => e.textContent.includes(${q(reads ?? "")}))`, { timeoutMs: 30_000 });
       });
       await stage.show("modal", "#pdfViewerViewport");
+      stage.beat("pane", { kind: "pdf", box: await stage.box("#pdfViewerViewport") });
     }
   },
   "pdf-passage": {
