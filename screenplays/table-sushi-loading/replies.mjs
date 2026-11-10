@@ -55,7 +55,7 @@ export async function respond(request, { rest }) {
   if (!called(request, "pdf_readPage")) return { toolCalls: [{ name: "pdf_readPage", arguments: { assetId: state.assetId, page: 1 } }] };
   if (!called(request, "table_submitResult")) {
     const citation = results(request).match(/\[\[cite:[^\]]+\]\]/)?.[0] ?? "";
-    return { toolCalls: [{ name: "table_submitResult", arguments: { kind: "answer", text:
+    return { toolCalls: [{ name: "table_submitResult", arguments: { text:
       `**Priced on 3×DWF.** The D7 note gives 6.73 MLD as average dry weather flow, and the estimate sizes the SBR decanters and blowers at a peak factor of 3.0. ` +
       `The CPHEEO excerpt sizes biological reactors on average flow and checks only hydraulic elements at peak ${citation}.\n\n` +
       `So the ₹32.7 cr line likely carries up to 2× too much tankage. Keep it as money at risk and ask for the reactor volume calculation.` } }] };

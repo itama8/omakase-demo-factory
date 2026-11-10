@@ -62,7 +62,7 @@ async function describe(file, root, name) {
 export async function findNarrations(root) {
   const notes = [];
   const home = path.join(root, "screenplays");
-  for (const file of (await markdownUnder(home)).sort()) {
+  for (const file of (await markdownUnder(home, (name) => name.startsWith(".") || ["node_modules", "vault"].includes(name))).sort()) {
     const folder = path.relative(home, file).split(path.sep);
     notes.push(await describe(file, root, folder.length > 1 ? folder[0] : null));
   }

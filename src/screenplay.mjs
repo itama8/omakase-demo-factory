@@ -28,7 +28,7 @@ function readArgs(action, name, step, where) {
     }
     const label = `${where}: ${key === "value" ? name : `${name}.${key}`}`;
     if (spec.type === "duration") args[key] = seconds(raw, label) * (key === "value" ? 1000 : 1);
-    else if (spec.type === "number") { if (typeof raw !== "number") throw new Error(`${label} must be a number; got ${JSON.stringify(raw)}`); args[key] = raw; }
+    else if (spec.type === "number") { if (typeof raw !== "number" || !Number.isFinite(raw)) throw new Error(`${label} must be a finite number; got ${JSON.stringify(raw)}`); args[key] = raw; }
     else if (spec.type === "enum") { if (!spec.values.includes(String(raw))) throw new Error(`${label} must be one of ${spec.values.join(", ")}; got ${JSON.stringify(raw)}`); args[key] = String(raw); }
     // YAML block text ends with a line break that nobody meant to type.
     else args[key] = String(raw).replace(/\n$/, "");
@@ -79,7 +79,7 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   const dir = path.dirname(file);
   const doc = parse(await readFile(file, "utf8"));
   if (!doc || typeof doc !== "object") throw new Error(`${file} is empty`);
-  const known = new Set(["title", "vault", "music", "seed", "sushi", "setup", "scenes"]);
+  const known = new Set(["title", "vault", "music", "seed", "sushi", "appearance", "setup", "scenes"]);
   for (const key of Object.keys(doc)) if (!known.has(key)) throw new Error(`${file}: unknown key "${key}". Known: ${[...known].join(", ")}`);
   if (!Array.isArray(doc.scenes) || !doc.scenes.length) throw new Error(`${file}: needs at least one scene`);
 
@@ -96,7 +96,8 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
   // returns a reply for the fake provider, and an optional `setup(profile)`
   // runs before launch. The same module is what `custom` steps import.
   let sushi = null;
-  if (doc.sushi) {
+  if (doc.appearance && (typeof doc.appearance !== "object" || Array.isArray(doc.appearance) || Object.entries(doc.appearance).some(([key, value]) => !["theme", "font"].includes(key) || typeof value !== "string"))) throw new Error(`${file}: appearance takes theme and font strings`);
+  if (doc.sushi && doc.sushi !== "live") {
     sushi = await import(pathToFileURL(path.resolve(dir, String(doc.sushi))).href);
     if (typeof sushi.respond !== "function") throw new Error(`${file}: ${doc.sushi} must export respond(request, helpers)`);
   }
@@ -109,8 +110,16 @@ export async function loadScreenplay(file, { actions, app, omakaseRoot }) {
     spans: scenes.flatMap((scene) => [scene.name, ...scene.steps.map((step) => step.id)]),
     scenario: {
       name,
+      dir,
+      appearance: doc.appearance,
+      liveProvider: doc.sushi === "live",
+      voiceFixture: [...setup, ...scenes.flatMap((scene) => scene.steps)].some((step) => step.name === "dictation"),
       vault: path.resolve(omakaseRoot, doc.vault ?? app.defaultVault),
       sushi,
+      action(name, stage, args) {
+        if (!actions[name]) throw new Error(`Unknown action ${name}`);
+        return actions[name].run(stage, args);
+      },
       async prepare(stage) { for (const step of setup) await step.run(stage); },
       async perform(stage) {
         for (const scene of scenes) {

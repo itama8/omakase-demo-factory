@@ -4,7 +4,7 @@
 // has to describe where things are. Nothing here knows what Omakase's UI
 // looks like; that knowledge lives in the action vocabulary.
 import { spawn } from "node:child_process";
-import { cp, mkdir, readdir, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
@@ -23,7 +23,7 @@ const SYMBOLS = { "`": ["Backquote", 192], "-": ["Minus", 189], "=": ["Equal", 1
 
 /** The physical key that produces `char`, and whether Shift is held. */
 export function keyFor(char) {
-  if (char === "\n") return { key: "Enter", code: "Enter", vk: 13, shift: false, text: "\r" };
+  if (char === "\n" || char === "Enter") return { key: "Enter", code: "Enter", vk: 13, shift: false, text: "\r" };
   if (char === "Space") return keyFor(" ");
   if (char in NAMED) return { key: char, code: char, vk: NAMED[char], shift: false };
   if (/^[a-z]$/i.test(char)) return { key: char, code: `Key${char.toUpperCase()}`, vk: char.toUpperCase().charCodeAt(0), shift: char !== char.toLowerCase(), text: char };
@@ -142,6 +142,7 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
   const random = mulberry32(seed);
   const beats = [];
   let app, recording, sushi, clock = null;
+  let profilePath;
   try {
     // Sushi scenes answer from a scripted local model server instead of a
     // real provider: the demo profile has no credentials. The real runtime
@@ -153,12 +154,25 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     }
     app = await launchApp({
       prefix: "omakase-demo-", main: true, args: [`--force-device-scale-factor=${scale}`],
+      env: scenario.voiceFixture ? { OMAKASE_VOICE_USE_FIXTURE: "1" } : {},
       setup: async (profile) => {
+        profilePath = profile;
         if (scenario.vault) await seedVault(scenario.vault, path.join(profile, "vault"));
         if (sushi) {
           await sushi.configure(profile, sushi.server.baseUrl);
           await sushi.script.setup?.(profile);
         }
+        const configPath = path.join(profile, "omakase.config.json");
+        let config = await readFile(configPath, "utf8").then(JSON.parse).catch((error) => { if (error.code === "ENOENT") return {}; throw error; });
+        if (scenario.liveProvider) {
+          if (!process.env.OMAKASE_PROFILE) throw new Error("sushi: live needs OMAKASE_PROFILE pointing at your saved Omakase profile");
+          const real = path.resolve(process.env.OMAKASE_PROFILE);
+          const saved = JSON.parse(await readFile(path.join(real, "omakase.config.json"), "utf8"));
+          await cp(path.join(real, "secrets/pi-agent"), path.join(profile, "secrets/pi-agent"), { recursive: true });
+          config.sushi = saved.sushi;
+        }
+        if (scenario.appearance) config.appearance = { ...config.appearance, ...scenario.appearance };
+        if (scenario.liveProvider || scenario.appearance) await writeFile(configPath, JSON.stringify(config));
       }
     });
     await app.evaluateMain(`${electronExpression}.BrowserWindow.getAllWindows()[0].setBounds({ x: 0, y: 0, width: ${width}, height: ${height} }), true`);
@@ -170,7 +184,8 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     let held = 0;
     const send = (type, key, extra = {}) => app.send("Input.dispatchKeyEvent", { type, key: key.key, code: key.code, windowsVirtualKeyCode: key.vk, modifiers: held, ...extra });
     const stage = {
-      app, width, height, random, pace,
+      app, width, height, random, pace, profile: profilePath, dir: scenario.dir, electron: electronExpression,
+      action: (name, args) => scenario.action(name, stage, args),
       /** Seconds since the first recorded frame. */
       now: () => clock === null ? 0 : (Date.now() - clock) / 1000,
       /** Log a beat. Boxes are fractions of the window, so the log does not depend on resolution. */
@@ -211,6 +226,12 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
       async up(name) { const mod = MODIFIERS[name]; held &= ~mod.bit; await send("keyUp", mod); },
       /** One key stroke, with Shift pressed and released around it when the character needs it. */
       async stroke(char, { holdMs = 45 } = {}) {
+        if ([...char].length === 1 && !/^[\x20-\x7e\n]$/.test(char)) {
+          if (held) throw new Error("Unicode input cannot be used as a shortcut");
+          await app.send("Input.insertText", { text: char });
+          await rest(holdMs);
+          return;
+        }
         const key = keyFor(char);
         // With Shift held, a letter key reports its capital. Shortcuts match on it.
         if (held & 8 && /^[a-z]$/.test(key.key)) key.key = key.key.toUpperCase();
@@ -266,6 +287,10 @@ export async function recordTake({ scenario, omakaseRoot, outDir, width = 1280, 
     await scenario.perform(stage);
     stage.beat("end");
     await rest(400);
+  } catch (error) {
+    const screenshot = await app?.screenshot(`demo-${scenario.name}-failure`).catch(() => null);
+    if (screenshot) console.error(`Evidence: screenshot=${screenshot}`);
+    throw error;
   } finally {
     await recording?.stop();
     await app?.close().catch((error) => console.error(`Teardown: ${error.message}`));

@@ -10,6 +10,8 @@
 // `args.value`. Every wait is on app state, never on a pause, so the same
 // action works at check speed.
 
+import { kitActions } from "./kit.mjs";
+
 const FIND = "noteSearch";
 const FIND_OPEN = `!document.getElementById('${FIND}').classList.contains('hidden')`;
 const FIND_CARD = `#${FIND} .note-search-card`;
@@ -39,6 +41,7 @@ const TABLE_SUSHI_PANEL = ".table-sushi-panel";
 const quote = (value) => JSON.stringify(value);
 
 export const actions = {
+  ...kitActions,
   pause: {
     summary: "Hold still. Rhythm only: nothing may depend on it.",
     args: { value: { type: "duration", required: true, doc: "how long, such as 800ms or 1.2s" } },

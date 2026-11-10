@@ -1,12 +1,7 @@
 # Omakase demo factory
 
-Read `README.md` first: it is the manual for screenplays, edits, and the pipeline.
+Read `AGENTS.md` and `.agents/skills/omakase-demo/SKILL.md` for the conversation-led demo workflow. Read `README.md` for commands and screenplay/edit formats. Maintain the script behind the scenes; users can start with a feature or rough idea.
 
-When working on a demo with the user:
+Existing file-based narrations still work with `draft`. When editing an existing screenplay marked `# Drafted from`, update its narration and draft again, or explicitly take it over by removing that marker. Never rename, move, or copy a user's narration without their request.
 
-- The user writes narration in plain English, in Markdown files with any name under `screenplays/` or in their vault. `node bin/demo.mjs draft` lists them and `draft <note>` converts one. When a screenplay starts with "# Drafted from", change its narration and draft again instead of editing the YAML. Never rename, move, or copy a narration.
-- Write the screenplay in `screenplays/<name>/screenplay.yaml` from the actions `node bin/demo.mjs actions` lists. Do not invent an action; add it to `actions/omakase.mjs` or use `custom`.
-- Prove it with `node bin/demo.mjs check <name>` before recording. A screenplay that needs a pause to pass is wrong: fix the action's wait.
-- Change pacing, cuts, and framing in `edit.yaml`, anchored to spans. Re-record only when the performance itself changes.
-- Omakase demos show a workflow and never name a feature on screen. See `../omakase-v2/demo-notes/README.md`.
-- Never edit files in `../omakase-v2` from here, and never rebuild it. Say so if the app's build looks stale.
+Never edit or rebuild `../omakase-v2` from here. Preserve the latest `edit.yaml`, including manual browser edits. Verify interactions with a real-app check before recording.

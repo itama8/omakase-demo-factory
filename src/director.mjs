@@ -26,6 +26,7 @@ export function direct(beats) {
   const lastLand = beats.findLast((beat) => beat.type === "land");
 
   beats.forEach((beat, index) => {
+    if (beat.type === "focus") shot(beat.t, beat.frame ?? (beat.box ? fit(beat.box, beat.zoom ?? 2.1) : WIDE), 0.8);
     if (beat.type === "type-start" && inNote(beat)) {
       // Push in on the caret, then follow it.
       const arrive = beat.t + 0.7;
