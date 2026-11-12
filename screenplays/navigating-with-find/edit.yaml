@@ -1,7 +1,0 @@
-# Changes laid over the take. Each names a span of the screenplay, so it
-# survives a new recording. `node bin/demo.mjs spans navigating-with-find`
-# lists the spans.
-edits:
-  # The opening is the slowest stretch. Let the first line land, then hurry.
-  - speed: 1.8
-    over: hello/type@start+2.5s .. hello/type@end

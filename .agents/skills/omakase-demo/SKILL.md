@@ -7,11 +7,13 @@ description: Use when asked to make an Omakase demo from a feature or rough idea
 
 The conversation is the authoring interface. You own the runnable script; the user owns the story and creative decisions. Work in this repository. Read its README for the commands and screenplay/edit formats.
 
+**Taste:** read `references/editorial.md` before you plan. It sets the standard for every stage: beats planned in `story.md`, room recorded around actions, a restrained first edit. Before handing back any cut, run the editorial review in `references/review.md` and fix what it finds.
+
 ## From idea to story
 
 Start with the feature, rough idea, or existing demo the user gives you. Read `node bin/demo.mjs context` and inspect the relevant app behavior, existing screenplays, and demo notes. Show a short proposed script in ordinary language: what happens on screen, the result worth seeing, and any caption. Discuss and refine it with the user. Do not ask them to write YAML or a narration file.
 
-Infer reasonable pacing and style from the request. Ask only about choices that change the story. For a short feature demo, a useful shape is a concrete opening → action → visible result. Do not force a duration, scene count, marketing tone, or music onto every demo. Show an actual workflow; use the app's own visual language. Let a short label settle for about a second, and a sentence for about 0.3 seconds per word.
+Plan the story as beats (notice → do → see → edit intent), as `references/editorial.md` describes. Infer reasonable pacing and style from the request. Ask only about choices that change the story. For a short feature demo, a useful shape is a concrete opening → action → visible result. Do not force a duration, scene count, marketing tone, or music onto every demo. Show an actual workflow; use the app's own visual language. Let a short label settle for about a second, and a sentence for about 0.3 seconds per word.
 
 Use `node bin/demo.mjs init <name> "<idea>"` for a new demo. Keep the agreed script and creative direction in `screenplays/<name>/story.md`, editing it yourself as the conversation evolves. Names use lowercase letters, digits and dashes. Reuse an existing demo when revising it; choose a new name for a distinct concept.
 
@@ -31,7 +33,7 @@ After the script is agreed, write `screenplay.yaml` behind the scenes. Do not ma
 - Website-kit demos already live in `website-tabs` and `website-sushi`. Keep their 1680×1000 framing, still camera, and intro/outro settings unless the user changes the direction. `sushi: gemini` needs `GEMINI_API_KEY` (or `OMK_KEY`) in the environment and uses a private session bus; never substitute a scripted answer for it. `sushi: live` retains the desktop keyring bus for saved credentials. The recorder always uses a private display for standalone runs.
 - `themes <name>` applies the current edit and exports 16 recoloured website MP4s and WebP posters into `out/<name>/films/`; `--only lumon,daylight` selects variants. Record in Retro 82 first. These are colour-map variants of one take, not separate app-theme recordings. `luts` rebuilds stale maps from `themes/refs/`. Keep generated maps and renders in `out/`.
 
-Run `node bin/demo.mjs produce <name>` as a long-running process. It checks the script at full speed, records a paced take, cuts it, and prints a local editable preview URL. Retain the process/session so the link stays alive. Open the URL with the available browser tools, watch representative moments, and give the user the actual link. This stage needs no MP4 render. A local link works on this machine; do not describe it as a public hosted link.
+Run `node bin/demo.mjs produce <name>` as a long-running process. It checks the script at full speed, records a paced take, cuts it, and prints a local editable preview URL. Retain the process/session so the link stays alive. Make the first edit following `references/editorial.md`, then run the review in `references/review.md`: render, inspect strips around every cut, zoom and payoff, write timestamped findings, fix them, and re-inspect. Then open the URL with the available browser tools and give the user the actual link. This stage needs no MP4 render. A local link works on this machine; do not describe it as a public hosted link.
 
 ## Revision loop
 

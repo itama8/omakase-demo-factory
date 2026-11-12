@@ -1,2 +1,7 @@
 node_modules/
 out/
+
+# Local demo projects, source fixtures, and exported videos.
+/screenplays/
+/fixtures/
+/yc-demos/

@@ -82,7 +82,7 @@ TMPDIR="$PWD/out/tmp" node bin/demo.mjs produce website-tabs
 - **An automatic camera** that follows the caret, the keys, and the panels that open.
 - **A drawn pointer.** The recording has no cursor, so the film draws one. It glides to each click the performance made, presses, and leaves a ripple.
 - **Overlays from `edit.yaml`:** captions, title and end cards, ring and spotlight highlights, key callouts, and dip transitions.
-- **Sound:** optional music, loudness-normalised, and optional synthesised key and click sounds (`sfx: true`).
+- **Sound:** optional music, loudness-normalised, and optional key and click sounds cut from real public-domain/CC0 recordings (`sfx: true`; see `sounds/SOURCE.md`).
 - **Exports** at 1080p, 720p, square, vertical, WebM, GIF, and a poster frame.
 
 ## Review and revise
@@ -161,7 +161,7 @@ A demo is a folder in `screenplays/` with a `screenplay.yaml`, an optional `edit
 title: Navigating with find
 vault: demo-notes            # seeded into the profile; relative to the Omakase checkout
 music: demo-notes/backing-tracks/Mozart-The Marriage of Figaro.wav
-sfx: true                    # synthesised key and click sounds
+sfx: true                    # recorded key and click sounds (sounds/)
 capture: { fps: 60, scale: 2 }
 
 setup:                       # before the camera rolls
@@ -186,7 +186,7 @@ scenes:
 - **`capture`**: the window defaults to 1280x720; `window: [1680, 1000]` changes its shape (each dimension must be between 640 and 2560 pixels). `scale: 2` records 2560x1440, which is sharp up to about a 1.33x zoom in a 1080p film; `scale: 3` records 3840x2160 and is sharp to 2x. `cut` warns when the camera zooms past what the take can hold. `fps` is 24, 25, 30, 50 or 60, and the recording warns if the capture fell behind.
 - **`film`**: `intro: none` removes the logo, `outro: none` removes the closing fade, and `camera: still` holds the whole window unless a saved camera edit overrides it. `slug: tabs` chooses the website filename suffix; `poster: 18` chooses the poster time in seconds. The film keeps the recorded window's aspect ratio.
 - **`focus`** sets a caption and optional camera target. `mark: ring` or `mark: spotlight` also highlights the target until the next focus.
-- **The escape hatch:** `- custom: steps.mjs#name` calls `export async function name(stage, step)` from a file beside the screenplay. Use `stage.click(selector)` for clicks the viewer should see, so the pointer is drawn. When the move earns its place, make it an action.
+- **The escape hatch:** `- custom: steps.mjs#name` calls `export async function name(stage, step)` from a file beside the screenplay. Use `stage.click(selector)` for clicks the viewer should see, so the pointer is drawn; it scrolls the target into view only when needed, with an eased glide. Use `stage.reveal(selector)` to bring anything else on screen; never `scrollIntoView`, whose instant jump reads as a cut. When the move earns its place, make it an action.
 - Fixtures (notes, CSV, PDF) go beside the screenplay. `sushi: replies.mjs` scripts the model; `sushi: live` uses the profile in `OMAKASE_PROFILE`, and its output varies. `dictation: fixture` uses the app's voice fixture, not a microphone.
 
 ## Editing

@@ -1,7 +1,0 @@
-edits:
-  - camera:
-      on:
-        - 0.5000087955549084
-        - 0.7573815711669354
-      zoom: 1
-    over: study@start .. study@end
