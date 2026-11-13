@@ -69,7 +69,14 @@ node bin/demo.mjs luts             # rebuild missing or stale maps from themes/r
 
 To refresh references after an app theme/layout change, add `theme-refs: ../../themes/refs` as the last step of a screenplay with the PDF open and a representative note and Sushi card visible. Run `check <name>` and then `luts`. These captures replace paired screenshots; keep every theme in the same app state. Generated colour maps stay in `out/luts/`.
 
-If `/tmp` is constrained, use disk-backed temporary storage:
+HyperFrames runs automatically use a private disk-backed folder under
+`out/tmp/hyperframes/` for temporary files and extracted-frame caches. The folder
+is deleted after each command, including failed renders and Ctrl+C. Concurrent
+renders have separate folders. Recordings, exports and `edit.yaml` are retained.
+After a power loss or forced kill (SIGKILL), leftover `run-*` folders can be
+deleted once no HyperFrames commands are running.
+
+To move the recorder's other temporary files off `/tmp` too:
 
 ```bash
 mkdir -p out/tmp/omakase-check

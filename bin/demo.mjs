@@ -20,9 +20,7 @@ import { listTakes, spliceBeats, spliceVideo, useTake } from "../src/takes.mjs";
 import { BASE_THEME, ensureLuts, recolourTake, webExport } from "../src/themes.mjs";
 import { importVideo, importedSettings } from "../src/import-video.mjs";
 import { serveFactory, libraryProjects } from "../src/factory.mjs";
-
-// Pinned, so a render today and a render next month use the same renderer.
-const HYPERFRAMES = "hyperframes@0.9.30";
+import { runHyperframes } from "../src/hyperframes.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // The check runner starts in the app repo. Otherwise use the sibling checkout.
@@ -76,10 +74,7 @@ const safeName = (name) => { if (!/^[a-z0-9][a-z0-9-]*$/.test(name ?? "")) throw
 const load = (name) => existsSync(path.join(root, "screenplays", safeName(name), "video.json")) ? importedSettings(root, name) : loadScreenplay(path.join(root, "screenplays", name, "screenplay.yaml"), { actions, app, omakaseRoot });
 const refs = path.join(root, "themes", "refs"), luts = path.join(root, "out", "luts");
 const hyperframes = (name, ...args) => hyperframesIn(path.join(out(name), "project"), ...args);
-const hyperframesIn = (cwd, ...args) => {
-  const result = spawnSync("npx", ["--yes", HYPERFRAMES, ...args], { cwd, stdio: "inherit" });
-  if (result.status !== 0) throw new Error(`hyperframes ${args[0]} failed`);
-};
+const hyperframesIn = (cwd, ...args) => runHyperframes({ root, cwd, args });
 function one() {
   if (names.length !== 1) throw new Error(`"${command}" takes one screenplay name.\n\n${usage}`);
   return safeName(names[0]);
@@ -133,13 +128,13 @@ async function record(name) {
   const { take } = await perform(name, { record: true });
   console.log(`${name}: recorded ${take.duration.toFixed(1)}s, ${take.beats.length} beats -> ${out(name)}`);
 }
-function render(name) {
+async function render(name) {
   const master = exportFile(out(name), name, "1080p");
   const cutAt = statSync(path.join(out(name), "project", "index.html")).mtimeMs;
   // Other presets are made from the master, so render it only when the cut is newer.
   if (preset === "1080p" || !existsSync(master) || statSync(master).mtimeMs < cutAt) {
-    hyperframes(name, "check");
-    hyperframes(name, "render", "--output", master);
+    await hyperframes(name, "check");
+    await hyperframes(name, "render", "--output", master);
   }
   console.log(`${name}: exported -> ${exportPreset({ out: out(name), name, preset, at })}`);
 }
@@ -282,7 +277,7 @@ const commands = {
       const project = path.join(dir, "project");
       await buildProject({ root, omakaseRoot, name, music: play.music, sfx: play.sfx, film: play.film, video, out: project });
       // The website plays films silently at 30 frames a second, so render no more than that.
-      hyperframesIn(project, "render", "--quiet", "--fps", "30", "--output", path.join(dir, "film.mp4"));
+      await hyperframesIn(project, "render", "--quiet", "--fps", "30", "--output", path.join(dir, "film.mp4"));
       const file = path.join(films, `${theme}-${slug}.mp4`);
       webExport({ master: path.join(dir, "film.mp4"), file, poster: play.film.poster ?? 0 });
       await rm(dir, { recursive: true, force: true });
@@ -315,7 +310,7 @@ const commands = {
     const name = one();
     await record(name);
     await cut(name);
-    render(name);
+    await render(name);
   }
 };
 
