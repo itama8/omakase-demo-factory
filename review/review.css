@@ -797,3 +797,144 @@ aside h2 {
   font-size: 10px;
   padding: 2px 4px;
 }
+
+/* Keyboard editing */
+.time-input,
+input[type="text"] {
+  color: var(--ink);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 9px;
+  width: 100%;
+  font:
+    12px ui-monospace,
+    monospace;
+}
+.range-inputs {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  border-radius: 6px;
+}
+.range-inputs label {
+  margin-bottom: 4px;
+}
+#mode {
+  flex: none;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font:
+    11px ui-monospace,
+    monospace;
+  color: var(--muted);
+  border: 1px solid var(--line);
+}
+#mode.is-editing {
+  color: var(--bg);
+  background: var(--accent);
+  border-color: var(--accent);
+}
+#mode.is-marking {
+  color: #ffd3c2;
+  border-color: #ff8a65;
+}
+#marks {
+  position: relative;
+  height: 0;
+  pointer-events: none;
+}
+.pending-mark {
+  position: absolute;
+  height: 5px;
+  margin-top: 2px;
+  min-width: 2px;
+  border-radius: 3px;
+  background: #ff8a65;
+  box-shadow: 0 0 0 1px #07171d;
+}
+[data-row] {
+  border-radius: 8px;
+  transition: box-shadow 0.12s;
+}
+.edit-card.is-editing {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.edit-card .is-kb {
+  box-shadow:
+    0 0 0 2px var(--bg),
+    0 0 0 4px var(--accent);
+}
+.range-inputs.is-kb {
+  padding: 4px 6px;
+}
+.add-effect {
+  margin-top: 10px;
+}
+.add-effect-toggle {
+  width: 100%;
+  font-size: 12px;
+  padding: 8px;
+}
+.effect-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.effect-picker button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  text-align: left;
+  font-size: 12px;
+}
+.effect-picker button.is-kb {
+  border-color: var(--accent);
+  background: #17363c;
+  box-shadow: none;
+}
+kbd {
+  display: inline-block;
+  min-width: 18px;
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font:
+    10px ui-monospace,
+    monospace;
+  text-align: center;
+  color: var(--ink);
+  background: var(--bg);
+}
+.hint.warn {
+  color: #ffd3a8;
+}
+.shortcuts {
+  margin: 4px 0 12px;
+}
+.shortcuts summary {
+  cursor: pointer;
+}
+.shortcuts dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 5px 10px;
+  margin: 10px 0;
+  font-size: 11px;
+}
+.shortcuts dt {
+  color: var(--muted);
+}
+.shortcuts dd {
+  margin: 0;
+  text-align: right;
+  white-space: nowrap;
+}

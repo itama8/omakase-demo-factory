@@ -114,6 +114,32 @@ export function moveRange(card, film, spans, start, end) {
   }
   return rangeFromTimeline(film, spans, start, end);
 }
+/**
+ * Move one edge of an edit by `delta` seconds of recorded footage. Works in
+ * take time, so repeated keypresses stay exact even before the preview catches
+ * up. A lone title card holds the film: its end changes how long it holds.
+ */
+export function nudgeRange(card, spans, edge, delta, shortest = 0.04) {
+  const scenes = Object.entries(spans)
+    .filter(([id]) => !id.includes("/"))
+    .map(([, s]) => s);
+  const first = Math.min(...scenes.map((s) => s.start)),
+    last = Math.max(...scenes.map((s) => s.end));
+  const clamp = (v, min, max) => Math.max(min, Math.min(max, v));
+  let [from, to] = resolveRange(card.range, spans);
+  if (card.effects?.card && Object.keys(card.effects).length === 1) {
+    if (edge === "end")
+      return {
+        range: card.range,
+        for: round(clamp(effectSeconds(card.effects.card.for) + delta, 0.2, 10)),
+      };
+    from = clamp(from + delta, first, last - 0.1);
+    return { range: `${anchorAt(spans, from)} .. ${anchorAt(spans, from + 0.1, "end")}` };
+  }
+  if (edge === "start") from = clamp(from + delta, first, to - shortest);
+  else to = clamp(to + delta, from + shortest, last);
+  return { range: `${anchorAt(spans, from)} .. ${anchorAt(spans, to, "end")}` };
+}
 export function importCards(edits, spans) {
   const cards = [];
   for (const [index, entry] of edits.entries()) {
@@ -182,7 +208,7 @@ export function defaultEffect(kind) {
   return structuredClone(
     {
       caption: { caption: "", box: [0.15, 0.78, 0.7, 0.15] },
-      camera: { camera: { on: [0.5, 0.5], zoom: 1.4 } },
+      camera: { camera: { on: [0.5, 0.5], zoom: 1.4 }, for: 0.8, ease: "power3.inOut" },
       speed: { speed: 1.5 },
       cut: { cut: "" },
       highlight: { highlight: [0.25, 0.25, 0.5, 0.5], style: "ring" },

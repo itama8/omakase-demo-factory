@@ -29,7 +29,8 @@ if (new URLSearchParams(location.search).has("review")) {
   resize();
   addEventListener("resize", resize);
   new ResizeObserver(resize).observe(document.body);
-  let media = [...document.querySelectorAll("video, audio")];
+  const MEDIA = "video:not(#scrub-proxy), audio";
+  let media = [...document.querySelectorAll(MEDIA)];
   let clips = [...document.querySelectorAll("[data-start][data-track-index]")];
   addEventListener(
     "error",
@@ -105,10 +106,58 @@ if (new URLSearchParams(location.search).has("review")) {
     if (sfx) sfx.dataset.stale = String(JSON.stringify(film.pieces) !== saved);
     window.__film = film;
     window.__buildTimeline(film);
-    media = [...document.querySelectorAll("video, audio")];
+    media = [...document.querySelectorAll(MEDIA)];
     clips = [...document.querySelectorAll("[data-start][data-track-index]")];
   }
-  function seek(t, playing, sound, inspection) {
+  // Scrubbing asks for a new frame on every pointer move. A decoder can only
+  // seek one at a time, so keep just the latest request while one is in
+  // flight instead of queueing a backlog the picture has to catch up with.
+  const pending = new WeakMap();
+  const target = (el) =>
+    pending.has(el) ? pending.get(el) : el.seeking ? el._seekTo : el.currentTime;
+  function seekMedia(el, at) {
+    if (!el._coalesced) {
+      el._coalesced = true;
+      el.addEventListener("seeked", () => {
+        if (!pending.has(el)) return;
+        const next = pending.get(el);
+        pending.delete(el);
+        if (Math.abs(el.currentTime - next) > 0.001) {
+          el._seekTo = next;
+          el.currentTime = next;
+        }
+      });
+    }
+    if (el.seeking) {
+      pending.set(el, at);
+      return;
+    }
+    el._seekTo = at;
+    el.currentTime = at;
+  }
+  // While scrubbing, a light copy of the take with dense keyframes stands in
+  // for the full one, on top of it inside #camera so zoom and crop still
+  // apply. Once the playhead settles the full take seeks once and the copy
+  // steps aside.
+  let proxy = null,
+    proxyOn = false,
+    settling = 0;
+  function useProxy(url) {
+    if (!url || proxy?.dataset.url === url) return;
+    proxy?.remove();
+    proxy = document.createElement("video");
+    Object.assign(proxy, { id: "scrub-proxy", className: "take", muted: true, playsInline: true, preload: "auto", src: url });
+    proxy.dataset.url = url;
+    proxy.style.visibility = "hidden";
+    proxyOn = false;
+    document.getElementById("camera").append(proxy);
+  }
+  function settled(el, done) {
+    if (!el.seeking && !pending.has(el)) done();
+    else el.addEventListener("seeked", () => settled(el, done), { once: true });
+  }
+  function seek(t, playing, sound, inspection, scrubbing = false) {
+    const quick = scrubbing && !playing && proxy?.readyState >= 1;
     window.__timelines.main.pause().seek(t, false);
     const effects = !playing && inspection?.effects;
     if (effects?.camera) {
@@ -168,6 +217,8 @@ if (new URLSearchParams(location.search).has("review")) {
       el.style.visibility =
         t >= start && t < start + duration ? "visible" : "hidden";
     }
+    let shown = null,
+      shownAt = 0;
     for (const el of media) {
       const start = Number(el.dataset.start),
         end = start + Number(el.dataset.duration),
@@ -184,10 +235,31 @@ if (new URLSearchParams(location.search).has("review")) {
           el.id === "music" ? Math.min(1, Math.max(0, (end - t) / 1.4)) : 1;
         el.volume = Number(el.dataset.volume ?? 1) * fade;
       }
-      if (active && Math.abs(el.currentTime - at) > (playing ? 0.2 : 0.015))
-        el.currentTime = at;
+      if (el.tagName === "VIDEO" && active) {
+        shown = el;
+        shownAt = at;
+      }
+      if (!quick && active && Math.abs(target(el) - at) > (playing ? 0.2 : 0.015))
+        seekMedia(el, at);
       if (active && playing && el.paused) el.play().catch(() => {});
       if ((!active || !playing) && !el.paused) el.pause();
+    }
+    if (quick && shown) {
+      const takes = [...document.querySelectorAll("#camera video.take:not(#scrub-proxy)")];
+      if (takes.at(-1)?.nextElementSibling !== proxy) takes.at(-1)?.after(proxy);
+      if (Math.abs(target(proxy) - shownAt) > 0.01) seekMedia(proxy, shownAt);
+      proxy.style.visibility = "visible";
+      proxyOn = true;
+      settling++;
+    } else if (proxyOn) {
+      const generation = ++settling;
+      const hide = () => {
+        if (generation !== settling) return;
+        proxy.style.visibility = "hidden";
+        proxyOn = false;
+      };
+      if (shown) settled(shown, hide);
+      else hide();
     }
   }
   addEventListener("message", (event) => {
@@ -209,6 +281,7 @@ if (new URLSearchParams(location.search).has("review")) {
       return;
     }
     if (event.data?.type !== "demo-seek") return;
+    useProxy(event.data.scrub);
     const t = Number(event.data.time);
     if (Number.isFinite(t))
       seek(
@@ -216,20 +289,28 @@ if (new URLSearchParams(location.search).has("review")) {
         !!event.data.playing,
         !!event.data.sound,
         event.data.inspection,
+        !!event.data.scrubbing,
       );
   });
-  addEventListener("keydown", (event) => {
+  // The review page owns every shortcut; hand keys on to it when the film has focus.
+  const forward = (event) => {
     if (
-      event.code === "Space" &&
-      !event.repeat &&
-      !event.target.closest(
-        "input,textarea,select,button,a,[contenteditable=true]",
-      )
-    ) {
+      event.target.closest?.("input,textarea,select,[contenteditable=true]")
+    )
+      return;
+    if (
+      event.code === "Space" ||
+      /^(Arrow|Page|Home$|End$)/.test(event.key)
+    )
       event.preventDefault();
-      parent.postMessage({ type: "demo-toggle-play" }, location.origin);
-    }
-  });
+    const { key, code, ctrlKey, shiftKey, altKey, metaKey, repeat } = event;
+    parent.postMessage(
+      { type: "demo-key", phase: event.type, key, code, ctrlKey, shiftKey, altKey, metaKey, repeat },
+      location.origin,
+    );
+  };
+  addEventListener("keydown", forward);
+  addEventListener("keyup", forward);
   try {
     seek(0, false, false);
     parent.postMessage(

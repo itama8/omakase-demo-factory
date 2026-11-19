@@ -58,12 +58,13 @@
                 ><svg class="icon-pause" viewBox="0 0 24 24" aria-hidden="true">
                   <path d="M6 5h4v14H6zM14 5h4v14h-4z" />
                 </svg></button
-              ><output id="clock">0:00 / 0:00</output
+              ><output id="clock">0:00.00 / 0:00.00</output
+              ><output id="mode" hidden></output
               ><label><input id="sound" type="checkbox" /> Sound</label>
             </div>
             <div
               id="timeline"
-              aria-label="Major events timeline. Ctrl-click and drag to add an edit range"
+              aria-label="Timeline. Shift+Space marks an edit range; press ? for keyboard shortcuts"
             >
               <input
                 id="seek"
@@ -75,6 +76,7 @@
                 aria-label="Playback position"
               />
               <nav id="scenes" class="timeline-row" aria-label="Scenes"></nav>
+              <div id="marks" aria-hidden="true"></div>
               <div id="edit-ranges" aria-label="Edit ranges"></div>
               <div id="range-selection" hidden>
                 <span class="range-handle start" data-edge="start"></span
@@ -98,9 +100,33 @@
           <button id="add-edit" type="button">+ Add edit</button>
         </div>
         <p class="hint">
-          Ctrl-click and drag on the timeline to select an edit range. Add one
-          or more effects to each edit.
+          Shift+Space marks where an edit starts and ends, even while playing.
+          Enter edits the selected range. Press ? for every shortcut.
         </p>
+        <details id="shortcuts" class="shortcuts">
+          <summary>Keyboard shortcuts</summary>
+          <dl>
+            <dt>Play / pause</dt><dd><kbd>Space</kbd></dd>
+            <dt>Step 0.1s · hold to scrub</dt><dd><kbd>←</kbd> <kbd>→</kbd></dd>
+            <dt>Step one frame</dt><dd><kbd>,</kbd> <kbd>.</kbd></dd>
+            <dt>Jump 1s</dt><dd><kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd></dd>
+            <dt>Previous / next edit edge</dt><dd><kbd>PgUp</kbd> <kbd>PgDn</kbd></dd>
+            <dt>Start / end an edit</dt><dd><kbd>Shift</kbd>+<kbd>Space</kbd></dd>
+            <dt>Start another inside it</dt><dd><kbd>Ctrl</kbd>+<kbd>Space</kbd></dd>
+            <dt>Choose edit under playhead</dt><dd><kbd>Ctrl</kbd>+<kbd>↑</kbd> <kbd>↓</kbd></dd>
+            <dt>Move end</dt><dd><kbd>Ctrl</kbd>+<kbd>←</kbd> <kbd>→</kbd></dd>
+            <dt>Move start</dt><dd><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>←</kbd> <kbd>→</kbd></dd>
+            <dt>…by one frame</dt><dd>add <kbd>Alt</kbd></dd>
+            <dt>Start / end at playhead</dt><dd><kbd>[</kbd> <kbd>]</kbd></dd>
+            <dt>Edit selected</dt><dd><kbd>Enter</kbd></dd>
+            <dt>Timing, effects, add</dt><dd><kbd>↑</kbd> <kbd>↓</kbd> then <kbd>Enter</kbd></dd>
+            <dt>Add effect</dt><dd><kbd>C</kbd> <kbd>Z</kbd> <kbd>S</kbd> <kbd>X</kbd> <kbd>H</kbd> <kbd>K</kbd> <kbd>T</kbd></dd>
+            <dt>Remove effect / edit</dt><dd><kbd>Delete</kbd></dd>
+            <dt>Back out</dt><dd><kbd>Esc</kbd></dd>
+            <dt>Undo</dt><dd><kbd>Ctrl</kbd>+<kbd>Z</kbd></dd>
+          </dl>
+          <p class="hint">Times are minutes:seconds (1:05.25). In a time field, ↑/↓ nudge it; Enter or Esc returns to the timeline. Ctrl-drag on the timeline still works with the mouse.</p>
+        </details>
         <div class="edit-toolbar">
           <button
             id="undo"

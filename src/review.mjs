@@ -4,13 +4,16 @@ import { mkdir, readFile, writeFile, rename, realpath, stat } from "node:fs/prom
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { parse, parseDocument } from "yaml";
 import { compileEdit, spansOf } from "./edit.mjs";
 import { planFilm } from "./film.mjs";
 import { exportFile, PRESETS } from "./export.mjs";
 import { listTakes, useTake } from "./takes.mjs";
 import { editableDocument } from "./recorded-edits.mjs";
+import { scrubCopy } from "./scrub.mjs";
 
+const TEMPLATE = fileURLToPath(new URL("../template", import.meta.url));
 const hash = (text) => createHash("sha256").update(text).digest("hex");
 const missing = (error) => { if (error.code === "ENOENT") return ""; throw error; };
 const fail = (message, status = 400) => Object.assign(new Error(message), { status });
@@ -21,13 +24,15 @@ export async function serveReview({ root, name, title = name.replaceAll('-', ' '
   if (!/^[a-z0-9][a-z0-9-]*$/.test(name)) throw new Error("Demo name must contain lowercase letters, digits and dashes");
   const out = path.join(root, "out", name), file = path.join(root, "screenplays", name, "edit.yaml");
   let busy = false, job = { state: "idle", log: "" }, child;
+  const scrub = scrubCopy(out);
   const readState = async () => {
     const [source, takeText] = await Promise.all([readFile(file, "utf8").catch(missing), readFile(path.join(out, "take.json"), "utf8")]);
     const take = JSON.parse(takeText), document = parse(source) ?? { edits: [] };
     const film = planFilm(take, compileEdit(document, take.beats), shape);
     const editable = editableDocument(take, document, shape);
     const revision = hash(source + takeText);
-    return { name, title, factoryUrl, revision, edits: editable.edits ?? [], recordedEdits: editable.recordedEdits ?? true, spans: spansOf(take.beats), film, takes: await listTakes(out), presets: Object.fromEntries(Object.entries(PRESETS).map(([id, preset]) => [id, preset.summary])), job: { ...job, current: job.revision === revision }, source };
+    scrub.refresh();
+    return { name, title, factoryUrl, revision, edits: editable.edits ?? [], recordedEdits: editable.recordedEdits ?? true, spans: spansOf(take.beats), film, takes: await listTakes(out), presets: Object.fromEntries(Object.entries(PRESETS).map(([id, preset]) => [id, preset.summary])), job: { ...job, current: job.revision === revision }, scrub: scrub.url, source };
   };
   // Fail before announcing a link if there is no usable take.
   await readState();
@@ -141,8 +146,11 @@ export async function serveReview({ root, name, title = name.replaceAll('-', ' '
       }
       if (!["GET", "HEAD"].includes(req.method)) throw fail("Method not allowed", 405);
       if (url.pathname === "/") return await sendFile(req, res, path.join(root, "review/index.html"), path.join(root, "review"));
+      // Older builds carry an older player; the review always speaks to the current one.
+      if (url.pathname === "/project/player.js") return await sendFile(req, res, path.join(TEMPLATE, "player.js"), TEMPLATE);
+      if (url.pathname === "/scrub.mp4") { if (!scrub.file) throw fail("The scrub copy is still being made", 404); return await sendFile(req, res, scrub.file, scrub.folder); }
       if (url.pathname.startsWith("/project/")) return await sendFile(req, res, path.resolve(out, "." + decodeURIComponent(url.pathname)), path.join(out, "project"));
-      if (["/review.js", "/review.css", "/edits.js", "/timeline.js", "/camera-grid.js", "/range-edits.js", "/snapping.js"].includes(url.pathname)) return await sendFile(req, res, path.join(root, "review", url.pathname.slice(1)), path.join(root, "review"));
+      if (["/review.js", "/review.css", "/edits.js", "/timeline.js", "/camera-grid.js", "/range-edits.js", "/snapping.js", "/keyboard.js"].includes(url.pathname)) return await sendFile(req, res, path.join(root, "review", url.pathname.slice(1)), path.join(root, "review"));
       if (url.pathname === "/download") {
         const state = await readState();
         if (job.state !== "ready" || job.revision !== state.revision) throw fail("Export the current edit first", 409);
@@ -159,5 +167,5 @@ export async function serveReview({ root, name, title = name.replaceAll('-', ' '
   await new Promise((resolve, reject) => { server.once("error", reject); server.listen(port, "127.0.0.1", resolve); });
   origin = `http://127.0.0.1:${server.address().port}`;
   console.log(`Preview: ${origin}/\nEdits: ${file}\nKeep this process running while reviewing.`);
-  return { server, url: origin + "/", close: async () => { child?.kill("SIGTERM"); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); } };
+  return { server, url: origin + "/", close: async () => { child?.kill("SIGTERM"); scrub.close(); server.closeAllConnections(); await new Promise((resolve) => server.close(resolve)); } };
 }
